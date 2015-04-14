@@ -68,169 +68,60 @@ proc delMpmcStack*(stk: StackPtr) =
   when DBG: dbg "-"
 
 proc push*(stk: StackPtr,  node: var StackNodePtr) =
-  ## Add msg to tail if this was added to an
-  ## empty queue return true
+  ## Add msg to top of stack
   proc dbg(s:string) = echo stk.name & ".push:" & s
   when DBG: dbg "+ p=" & ptrToStr(p)
 
   var curTosNext = stk.tos.next
   node.next = curTosNext
-  while not atomicCompareExchange[StackNodePtr](addr stk.tos.next, addr curTosNext, addr node, true, ATOMIC_RELEASE, ATOMIC_ACQUIRE):
+  while not atomicCompareExchangeN[StackNodePtr](addr stk.tos.next,
+    addr curTosNext, node, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
     curTosNext = stk.tos.next
     node.next = curTosNext
 
   when DBG: dbg "- stk=" & $stk
 
-#proc pop*(stk: StackPtr): StackNodePtr =
-#  ## Return head or nil if empty
-#  ## May only be called from consumer
-#  proc dbg(s:string) = echo stk.name & ".pop:" & s
-#  when DBG: dbg "+ mq=" & $mq
-#
-#  var tos = stk.tos
-#  when DBG: dbg " tos=" & $tos
-#  # serialization-point wrt producers, acquire
-#  var next = atomicLoadN(addr head.next, ATOMIC_ACQUIRE)
-#  when DBG: dbg " next=" & $next
-#  if next != nil:
-#    result = next.msg
-#    when DBG: dbg " next != nil result = next.msg result=" & $result
-#    mq.head = next
-#    when DBG: dbg " next != nil mq.head = next mq=" & $mq
-#    mq.arena.retMsgNode(head)
-#    when DBG: dbg " next != nil return head to arena mq.arena=" & $mq.arena
-#  else:
-#    when DBG: dbg " next == nil result=nil, mq=" & $mq
-#    result = nil
-#  when DBG: dbg "- msg=" & $result & " mq=" & $mq
+proc pop*(stk: StackPtr): StackNodePtr =
+  ## Remove msg from top of stack or nil if the stack is empty
+  proc dbg(s:string) = echo stk.name & ".push:" & s
+  when DBG: dbg "+ p=" & ptrToStr(p)
+
+  result = stk.tos.next
+  if result != nil:
+    var newTosNext = result.next
+    while not atomicCompareExchange[StackNodePtr](addr stk.tos.next,
+      addr result, addr newTosNext, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+      result = stk.tos.next
+      newTosNext = result.next
+
+  when DBG: dbg "- stk=" & $stk
 
 when isMainModule:
   import unittest
 
-  suite "test atomicCompareExchange":
-    test "atomicCompareExchange ...":
-      type
-        O = object
-          i: int
-
-      var
-        o1: O
-        o2: O
-        o3: O
-
-      o1.i = 1
-      o2.i = 1
-      o3.i = 3
-
-      echo "o1=", o1
-      echo "o2=", o2
-      echo "o3=", o3
-      check(o1.i == 1 and o2.i == 1 and o3.i == 3)
-      var r = atomicCompareExchange[O](addr o1, addr o2, addr o3, true, ATOMIC_RELEASE, ATOMIC_ACQUIRE)
-      echo " r=", r
-      echo "o1=", o1
-      echo "o2=", o2
-      echo "o3=", o3
-      check(o1.i == 3 and o2.i == 1 and o3.i == 3)
+  suite "test mpmcstack":
 
     test "newMpcStack":
       var stk = newMpmcStack("stk")
       echo "stk=", stk
       check(stk.tos.next == nil)
     
-    test "push":
+    test "pop from empty stk":
+      var stk = newMpmcStack("stk")
+      echo "stk=", stk
+      var sn = stk.pop()
+      check(sn == nil)
+    
+    test "push pop":
       var stk = newMpmcStack("stk")
       echo "stk=", stk
       var sn = newStackNode(1)
+      check(sn != nil)
+      check(sn.id == 1)
       stk.push(sn)
       echo "stk=", stk
-      sn = newStackNode(2)
-      stk.push(sn)
+      var snr = stk.pop()
       echo "stk=", stk
+      check(sn != nil)
+      check(sn.id == 1)
     
-    #test "atomicCompareExchangeN ...":
-    #  type
-    #    O = object
-    #      i: int
-
-    #  var
-    #    o1: O
-    #    o2: O
-    #    o3: O
-
-    #  o1.i = 1
-    #  o2.i = 1
-    #  o3.i = 3
-
-    #  echo "o1=", o1
-    #  echo "o2=", o2
-    #  echo "o3=", o3
-    #  check(o1.i == 1 and o2.i == 1 and o3.i == 3)
-    #  # mpmcstack.c fails to compile with error:
-    #  #  error: incompatible type for argument 1 of ‘__atomic_compare_exchange_n’
-    #  var r = atomicCompareExchangeN[O](addr o1, addr o2, o3, true, ATOMIC_RELEASE, ATOMIC_ACQUIRE)
-    #  echo " r=", r
-    #  echo "o1=", o1
-    #  echo "o2=", o2
-    #  echo "o3=", o3
-    #  #check(p1 == 2 and p2 == 2 and p3 == 1)
-
-
-  #suite "test atomicExchange":
-  #  test "atomicExchange(p1, p2, p3)":
-  #    var
-  #      p1: int
-  #      p2: int
-  #      p3: int
-
-  #    p1 = 1
-  #    p2 = 2
-  #    p3 = 3
-
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "p3=", p3
-  #    check(p1 == 1 and p2 == 2 and p3 == 3)
-  #    atomicExchange(addr p1, addr p2, addr p3, ATOMIC_ACQ_REL)
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "p3=", p3
-  #    check(p1 == 2 and p2 == 2 and p3 == 1)
-
-  #  test "atomicExchange(p1, p2, p2)":
-  #    var
-  #      p1: int
-  #      p2: int
-  #      p3: int
-
-  #    p1 = 1
-  #    p2 = 2
-  #    p3 = 3
-
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "p3=", p3
-  #    check(p1 == 1 and p2 == 2 and p3 == 3)
-  #    atomicExchange(addr p1, addr p2, addr p2, ATOMIC_ACQ_REL)
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "p3=", p3
-  #    check(p1 == 2 and p2 == 1 and p3 == 3)
-
-  #  test "atomicExchangeN":
-  #    var
-  #      p1: int
-  #      p2: int
-  #      p3: int
-
-  #    p1 = 1
-  #    p2 = 2
-  #    p3 = 3
-
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "p3=", p3
-  #    var r = atomicExchangeN(addr p1, p2, ATOMIC_ACQ_REL)
-  #    echo "p1=", p1
-  #    echo "p2=", p2
-  #    echo "r =", r

@@ -3,7 +3,7 @@ import nake
 #cao.parseArgsOpts()
 
 var
-  buildArtifacts = @["nimcache", "mpscfifo", "tests/nimcache", "tests/t1"]
+  buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack", "tests/nimcache", "tests/testatomics", "tests/t1"]
   #buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
   buildFlags = "-d:release --verbosity:3 --hints:off --warnings:on --threads:on --embedsrc --lineDir:on --parallelBuild:1"
 
@@ -23,11 +23,29 @@ proc runNim(fullPath: string) =
     echo "error running: file=", fullPath
     quit 1
 
+proc compileRun(fullPath: string) =
+  compileNim(fullPath)
+  runNim(fullPath)
+
+proc cleanCompileRun(fullPath: string) =
+  runTask "clean"
+  compileNim(fullPath)
+  runNim(fullPath)
+
 proc fullCompileRun(fullPath: string) =
   runTask "clean"
   runTask "docs"
   compileNim(fullPath)
   runNim(fullPath)
+
+task "mpscfifo", "compile and run mpscfifo":
+  compileRun("./mpscfifo")
+
+task "mpmcstack", "compile and run mpmcstack":
+  compileRun("./mpmcstack")
+
+task "testatomics", "compile and run testatomics":
+  compileRun("tests/testatomics")
 
 task "t1", "Clean, Compile and run the tests":
   fullCompileRun("tests/t1")

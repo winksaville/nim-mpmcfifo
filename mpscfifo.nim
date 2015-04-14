@@ -108,7 +108,7 @@ proc rmv*(q: QueuePtr): MsgPtr =
 when isMainModule:
   import unittest
 
-  suite "test msgqueueniwf":
+  suite "test mpscfifo":
     var ma: MsgArenaPtr
 
     setup:
