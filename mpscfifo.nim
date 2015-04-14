@@ -6,8 +6,8 @@
 # addTail to return a boolean indicating if the msg
 # was added to an empty queue. The problem is empty
 # is defined by head.next == nil but we add to the
-# tail and in this MPSC queue we can look at to
-# items that need to be atomic. So for now we'll not
+# tail and in this MPSC queue we can't make two items
+# atomic at the same time. So for now we'll not
 # have that information.
 import msg, msgarena, locks, strutils
 
