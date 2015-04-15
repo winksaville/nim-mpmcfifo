@@ -4,8 +4,8 @@ import nake
 
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack", "tests/nimcache", "tests/testatomics", "tests/t1"]
-  #buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
-  buildFlags = "-d:release --verbosity:3 --hints:off --warnings:on --threads:on --embedsrc --lineDir:on --parallelBuild:1"
+  buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
+  #buildFlags = "-d:release --verbosity:3 --hints:off --warnings:on --threads:on --embedsrc --lineDir:on --parallelBuild:1"
 
   docFlags = ""
   docFiles: seq[string] = @[]
@@ -47,8 +47,8 @@ task "mpmcstack", "compile and run mpmcstack":
 task "testatomics", "compile and run testatomics":
   compileRun("tests/testatomics")
 
-task "t1", "Clean, Compile and run the tests":
-  fullCompileRun("tests/t1")
+task "t1", "compile and run t1":
+  compileRun("tests/t1")
 
 task "build-t1", "Build t1":
   compileNim("tests/t1")

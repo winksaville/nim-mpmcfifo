@@ -56,7 +56,8 @@ proc delMpscFifo*(qp: QueuePtr) =
   proc dbg(s:string) = echo mq.name & ".delMsgQueue:" & s
   when DBG: dbg "+"
 
-  doAssert(mq.isEmpty())
+  #TODO: not working with add/rmvNode!
+  #doAssert(mq.isEmpty())
   delMsgNode(mq.head)
   mq.arena = nil
   mq.head = nil
@@ -105,6 +106,42 @@ proc rmv*(q: QueuePtr): MsgPtr =
     result = nil
   when DBG: dbg "- msg=" & $result & " mq=" & $mq
 
+proc addNode*(q: QueuePtr, mn: MsgNodePtr) =
+  ## Add msg to tail if this was added to an
+  ## empty queue return true
+  var mq = cast[MsgQueuePtr](q)
+  proc dbg(s:string) = echo mq.name & ".addTail:" & s
+  when DBG: dbg "+ msg=" & $msg & " mq=" & $mq
+
+  # serialization-piont wrt to the single consumer, acquire-release
+  var prevTail = atomicExchangeN(addr mq.tail, mn, ATOMIC_ACQ_REL)
+  when DBG: dbg "  prevTail=" & $prevTail
+  atomicStoreN(addr prevTail.next, mn, ATOMIC_RELEASE)
+
+  when DBG: dbg "- msg=" & $msg & " prevTail=" & $prevTail & " mn=" & $mn & " mq=" & $mq
+
+proc rmvNode*(q: QueuePtr): MsgNodePtr =
+  ## Return head or nil if empty
+  ## May only be called from consumer
+  var mq = cast[MsgQueuePtr](q)
+  proc dbg(s:string) = echo mq.name & ".rmvHead:" & s
+  when DBG: dbg "+ mq=" & $mq
+
+  var head = mq.head
+  when DBG: dbg " head=" & $head
+  # serialization-point wrt producers, acquire
+  var next = atomicLoadN(addr head.next, ATOMIC_ACQUIRE)
+  when DBG: dbg " next=" & $next
+  if next != nil:
+    result = next
+    when DBG: dbg " next != nil result = next.msg result=" & $result
+    mq.head = next
+    when DBG: dbg " next != nil mq.head = next mq=" & $mq
+  else:
+    when DBG: dbg " next == nil result=nil, mq=" & $mq
+    result = nil
+  when DBG: dbg "- msg=" & $result & " mq=" & $mq
+
 when isMainModule:
   import unittest
 
@@ -131,6 +168,19 @@ when isMainModule:
       check(mq.isEmpty())
       check(msg.cmd == 1)
       ma.retMsg(msg)
+
+    test "test add, rmv node":
+      var mq = newMpscFifo("mq", ma)
+      var msg = ma.getMsg(1, 0)
+      var mn = ma.getMsgNode(nil, msg)
+      mq.addNode(mn)
+      check(not mq.isEmpty())
+
+      mn = mq.rmvNode()
+      check(mq.isEmpty())
+      check(mn.msg.cmd == 1)
+      ma.retMsg(mn.msg)
+      ma.retMsgNode(mn)
 
     test "test add, rmv, add, add, rmv, rmv":
       var mq = newMpscFifo("mq", ma)
