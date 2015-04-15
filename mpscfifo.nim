@@ -11,7 +11,7 @@
 # have that information.
 import msg, msgarena, locks, strutils
 
-const DBG = false
+const DBG = true
 
 type
   MsgQueue* = object of Queue
@@ -111,14 +111,14 @@ proc addNode*(q: QueuePtr, mn: MsgNodePtr) =
   ## empty queue return true
   var mq = cast[MsgQueuePtr](q)
   proc dbg(s:string) = echo mq.name & ".addTail:" & s
-  when DBG: dbg "+ msg=" & $msg & " mq=" & $mq
+  when DBG: dbg "+ mn=" & $mn & " mq=" & $mq
 
   # serialization-piont wrt to the single consumer, acquire-release
   var prevTail = atomicExchangeN(addr mq.tail, mn, ATOMIC_ACQ_REL)
   when DBG: dbg "  prevTail=" & $prevTail
   atomicStoreN(addr prevTail.next, mn, ATOMIC_RELEASE)
 
-  when DBG: dbg "- msg=" & $msg & " prevTail=" & $prevTail & " mn=" & $mn & " mq=" & $mq
+  when DBG: dbg "- mn=" & $mn & " prevTail=" & $prevTail & " mq=" & $mq
 
 proc rmvNode*(q: QueuePtr): MsgNodePtr =
   ## Return head or nil if empty
