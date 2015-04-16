@@ -3,7 +3,8 @@
 ## This implemenation uses a linked list of LinkNode's
 import linknode, typeinfo, strutils
 
-const DBG = false
+const
+  DBG = false
 
 type
   StackPtr* = ptr Stack

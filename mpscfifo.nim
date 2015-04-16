@@ -1,7 +1,18 @@
-# Wait free/Thread safe Msg Queue modeled after Dimitry Vyukov's non intrusive
-# MPSC algorithm here:
-#   http://www.1024cores.net/home/lock-free-algorithms/queues/non-intrusive-mpsc-node-based-queue
-#
+## A MpscFifo is a wait free/thread safe multi-producer
+## single consumer first in first out queue. This algorithm
+## is from Dimitry Vyukov's non intrusive MPSC code here:
+##   http://www.1024cores.net/home/lock-free-algorithms/queues/non-intrusive-mpsc-node-based-queue
+##
+## The fifo has a head and at tail, the elements are added
+## to the tail of the queue and removed from the head.
+## Rather than storing the elements directly in the queue
+## link nodes are used which have two fields, next and
+## extra. The next field point so the next element in the
+## list of nil if there no ext element. The extra field
+## points to the invokers data.
+##
+## ....
+##
 # At this time I couldn't figure out a good way for
 # addTail to return a boolean indicating if the msg
 # was added to an empty queue. The problem is empty
@@ -9,6 +20,7 @@
 # tail and in this MPSC queue we can't make two items
 # atomic at the same time. So for now we'll not
 # have that information.
+
 import msg, msgarena, linknode, locks, strutils
 
 const DBG = false
@@ -32,9 +44,11 @@ proc `$`*(mq: MsgQueuePtr): string =
       "}"
 
 proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
-  var head = mq.head
-  var next = atomicLoadN(addr head.next, ATOMIC_ACQUIRE)
-  result = next == nil
+  ## Check if empty is only useful if its known that
+  ## no other threads are using the queue. Therefore
+  ## this is private and only used in delMpscFifo and
+  ## testing.
+  result = mq.head.next == nil
 
 proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
   ## Create a new Fifo
@@ -54,9 +68,8 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
 proc delMpscFifo*(qp: QueuePtr) =
   var mq = cast[MsgQueuePtr](qp)
   proc dbg(s:string) = echo mq.name & ".delMpscFifo:" & s
-  when DBG: dbg "+"
+  when DBG: dbg "+ mq=" & $mq
 
-  #TODO: not working with add/rmvNode!
   doAssert(mq.isEmpty())
   mq.arena.retLinkNode(mq.head)
   mq.arena = nil
@@ -76,7 +89,6 @@ proc addNode*(q: QueuePtr, ln: LinkNodePtr) =
 
     # serialization-piont wrt to the single consumer, acquire-release
     var prevTail = atomicExchangeN(addr mq.tail, ln, ATOMIC_ACQ_REL)
-    when DBG: dbg "  prevTail=" & $prevTail
     atomicStoreN(addr prevTail.next, ln, ATOMIC_RELEASE)
 
     when DBG: dbg "- mq=" & $mq
@@ -90,7 +102,7 @@ proc add*(q: QueuePtr, msg: MsgPtr) =
 
 proc rmvNode*(q: QueuePtr): LinkNodePtr =
   ## Return the next fifo link node or nil if empty
-  ## May only be called from consumer
+  ## May only be called from consumer.
   var mq = cast[MsgQueuePtr](q)
   proc dbg(s:string) = echo mq.name & ".rmvNode:" & s
   when DBG: dbg "+ mq=" & $mq
@@ -101,13 +113,21 @@ proc rmvNode*(q: QueuePtr): LinkNodePtr =
   var next = cast[LinkNodePtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
   when DBG: dbg " next=" & $next
   if next != nil:
-    result = head
-    result.extra = next.extra
-    when DBG: dbg " next != nil result = next.msg result=" & $result
+    # Not empty mq.head.next.extra is the users data
+    # and it will be returned in the stub LinkNode
+    # pointed to by mq.head.
+
+    # next (aka mq.head.next) is the new stub LinkNode
     mq.head = next
-    when DBG: dbg " next != nil mq.head = next mq=" & $mq
+    # And head, the old stub LinkNode aka mq.head is result
+    # and we set result.next to nil so the link node is
+    # ready to be reused and result.extra contains the
+    # users data i.e. mq.head.next.extra.
+    result = head
+    result.next = nil
+    result.extra = next.extra
   else:
-    when DBG: dbg " next == nil result=nil, mq=" & $mq
+    # Empty
     result = nil
   when DBG: dbg "- ln=" & $result & " mq=" & $mq
 
@@ -133,198 +153,231 @@ when isMainModule:
     teardown:
       ma.delMsgArena()
 
-    test "test we can create and delete fifo":
-      var mq = newMpscFifo("mq", ma)
-      mq.delMpscFifo()
+    #test "test we can create and delete fifo":
+    #  var mq = newMpscFifo("mq", ma)
+    #  mq.delMpscFifo()
 
-    test "test new queue is empty":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
+    #test "test new queue is empty":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
 
-      # rmv from empty queue
-      msg = mq.rmv()
-      check(mq.isEmpty())
+    #  # rmv from empty queue
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
 
-      mq.delMpscFifo()
+    #  mq.delMpscFifo()
 
-    test "test new queue is empty twice":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
+    #test "test new queue is empty twice":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
 
-      # rmv from empty queue
-      msg = mq.rmv()
-      check(mq.isEmpty())
+    #  # rmv from empty queue
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
 
-      # rmv from empty queue
-      msg = mq.rmv()
-      check(mq.isEmpty())
+    #  # rmv from empty queue
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
 
-      mq.delMpscFifo()
+    #  mq.delMpscFifo()
 
-    test "test add, rmv":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
+    #test "test add, rmv":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
 
-      # add 1
-      msg = ma.getMsg(1, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
 
-      # rmv 1
-      msg = mq.rmv()
-      check(mq.isEmpty())
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
+    #  # rmv 1
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
 
-      mq.delMpscFifo()
+    #  mq.delMpscFifo()
 
-    test "test add, rmv node":
-      var mq = newMpscFifo("mq", ma)
-      var msg = ma.getMsg(1, 0)
-      var ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      check(not mq.isEmpty())
+    #test "test add, rmv node":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg = ma.getMsg(1, 0)
+    #  var ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
 
-      ln = mq.rmvNode()
-      check(mq.isEmpty())
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
-      ma.retLinkNode(ln)
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
 
-    test "test add, rmv, add, rmv":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
+    #  mq.delMpscFifo()
 
-      # add 1
-      msg = ma.getMsg(1, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
-
-      # rmv 1
-      msg = mq.rmv()
-      check(mq.isEmpty())
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
-
-      # add 2
-      msg = ma.getMsg(2, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
-
-      # rmv 2
-      msg = mq.rmv()
-      check(mq.isEmpty())
-      check(msg.cmd == 2)
-      ma.retMsg(msg)
-
-    test "test add, rmv, add, rmv node":
+    test "test reusing node":
       var mq = newMpscFifo("mq", ma)
       var msg: MsgPtr
       var ln: LinkNodePtr
 
-      # add 1
       msg = ma.getMsg(1, 0)
       ln = ma.getLinkNode(nil, msg)
       mq.addNode(ln)
-      check(not mq.isEmpty())
-
-      # rmv 1
       ln = mq.rmvNode()
-      check(mq.isEmpty())
       msg = toMsg(ln.extra)
       check(msg.cmd == 1)
       ma.retMsg(msg)
+
+      when true:
+        msg = ma.getMsg(2, 0)
+        ln.initLinkNode(nil, msg)
+        mq.addNode(ln)
+        ln = mq.rmvNode()
+        msg = toMsg(ln.extra)
+        check(msg.cmd == 2)
+
       ma.retLinkNode(ln)
 
-      # add 2
-      msg = ma.getMsg(2, 0)
-      ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      check(not mq.isEmpty())
+      mq.delMpscFifo()
 
-      # rmv 2
-      ln = mq.rmvNode()
-      check(mq.isEmpty())
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 2)
-      ma.retMsg(msg)
-      ma.retLinkNode(ln)
+    #test "test add, rmv, add, rmv":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
 
-    test "test add, rmv, add, add, rmv, rmv":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
 
-      # add 1
-      msg = ma.getMsg(1, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
+    #  # rmv 1
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
 
-      # rmv 1
-      msg = mq.rmv()
-      check(mq.isEmpty())
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
+    #  # add 2
+    #  msg = ma.getMsg(2, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
 
-      # add 2, add 3
-      msg = ma.getMsg(2, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
-      msg = ma.getMsg(3, 0)
-      mq.add(msg)
-      check(not mq.isEmpty())
+    #  # rmv 2
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 2)
+    #  ma.retMsg(msg)
 
-      # rmv 2, rmv 3
-      msg = mq.rmv()
-      check(msg.cmd == 2)
-      check(not mq.isEmpty())
-      ma.retMsg(msg)
-      msg = mq.rmv()
-      check(msg.cmd == 3)
-      check(mq.isEmpty())
-      ma.retMsg(msg)
+    #test "test add, rmv, add, rmv node":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
 
-    test "test add, rmv, add, add, rmv, rmv node":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
-      var ln: LinkNodePtr
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
 
-      # add 1
-      msg = ma.getMsg(1, 0)
-      ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      check(not mq.isEmpty())
+    #  # rmv 1
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
 
-      # rmv 1
-      ln = mq.rmvNode()
-      check(mq.isEmpty())
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
-      ma.retLinkNode(ln)
+    #  # add 2
+    #  msg = ma.getMsg(2, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
 
-      # add 2, add 3
-      msg = ma.getMsg(2, 0)
-      ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      check(not mq.isEmpty())
-      msg = ma.getMsg(3, 0)
-      ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      check(not mq.isEmpty())
+    #  # rmv 2
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 2)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
 
-      # rmv 2
-      ln = mq.rmvNode()
-      check(not mq.isEmpty())
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 2)
-      ma.retMsg(msg)
-      ma.retLinkNode(ln)
+    #  mq.delMpscFifo()
 
-      ln = mq.rmvNode()
-      check(mq.isEmpty())
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 3)
-      ma.retMsg(msg)
-      ma.retLinkNode(ln)
+    #test "test add, rmv, add, add, rmv, rmv":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
+
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 1
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+
+    #  # add 2, add 3
+    #  msg = ma.getMsg(2, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
+    #  msg = ma.getMsg(3, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 2, rmv 3
+    #  msg = mq.rmv()
+    #  check(msg.cmd == 2)
+    #  check(not mq.isEmpty())
+    #  ma.retMsg(msg)
+    #  msg = mq.rmv()
+    #  check(msg.cmd == 3)
+    #  check(mq.isEmpty())
+    #  ma.retMsg(msg)
+
+    #  mq.delMpscFifo()
+
+    #test "test add, rmv, add, add, rmv, rmv node":
+    #  var mq = newMpscFifo("mq", ma)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
+
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 1
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  # add 2, add 3
+    #  msg = ma.getMsg(2, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+    #  msg = ma.getMsg(3, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 2
+    #  ln = mq.rmvNode()
+    #  check(not mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 2)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 3)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  mq.delMpscFifo()
 

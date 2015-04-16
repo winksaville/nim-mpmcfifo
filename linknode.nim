@@ -1,5 +1,8 @@
 ## LinkNode for linked lists
-import strutils
+import msg, strutils
+
+const
+  DBG = false
 
 type
   LinkNodePtr* = ptr LinkNode
@@ -13,7 +16,7 @@ proc ptrToStr(label: string, p: pointer): string =
   else:
     result = label & "0x" & toHex(cast[int](p), sizeof(p)*2)
 
-when defined MsgPtr:
+when true: #defined MsgPtr:
   # TODO: Fix me we should be assuming all extras are MsgPtr's
   # TODO: just because its defined!
   proc `$`*(ln: LinkNodePtr): string =
@@ -37,12 +40,19 @@ else:
                  ptrToStr(" ext:", ln.extra) &
                "}"
 
-proc newLinkNode*(next: LinkNodePtr, extra: pointer): LinkNodePtr =
+proc initLinkNode*(ln: LinkNodePtr, next: LinkNodePtr, extra: pointer) {.inline.} =
+  ## Initialize a link node
+  ln.next = next
+  ln.extra = extra
+  when DBG: echo "initLinkNode: ln=", ln
+
+proc newLinkNode*(next: LinkNodePtr, extra: pointer): LinkNodePtr {.inline.} =
   ## Allocate a new LinkNode.
   result = cast[LinkNodePtr](allocShared(sizeof(LinkNode)))
-  result.next = next
-  result.extra = extra
+  result.initLinkNode(next, extra)
+  when DBG: echo "newLinkNode: ln=", result
 
-proc delLinkNode*(mn: LinkNodePtr) =
+proc delLinkNode*(ln: LinkNodePtr) {.inline.} =
   ## Deallocate a LinkNode
-  freeShared(mn)
+  when DBG: echo "delLinkNode: ln=", ln
+  freeShared(ln)

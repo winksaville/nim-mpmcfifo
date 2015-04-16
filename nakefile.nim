@@ -1,7 +1,5 @@
 import nake
 
-#cao.parseArgsOpts()
-
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack", "tests/nimcache", "tests/testatomics", "tests/t1"]
   buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
