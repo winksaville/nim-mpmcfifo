@@ -24,7 +24,7 @@ suite "bm msgareana", 0.25:
 
 
   #bm msgareana.test add/rmvNode: ts={min=10cy mean=34cy minC=222 n=4310836}
-  test "test add/rmvNode", 4.0, tsa:
+  test "test add/rmvNode", 1, tsa:
     mq.addNode(mn)
     mn = mq.rmvNode()
 
@@ -38,6 +38,9 @@ suite "bm msgareana", 0.25:
     ma.retMsg(msg)
 
   #bm msgareana.test add/rmv: ts={min=121cy mean=142cy minC=1 n=4184734}
-  test "test add/rmv", 4.0, tsa:
+  test "test add/rmv", 1, tsa:
+    echo "adding"
     mq.add(msg)
+    echo "removing"
     msg = mq.rmv()
+    echo "done removing"

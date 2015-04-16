@@ -11,6 +11,12 @@ type
     name*: string
     tos*: LinkNode
 
+iterator items*(stk: StackPtr): LinkNodePtr {.inline.} =
+  var cur = stk.tos.next
+  while cur != addr stk.tos:
+    yield cur
+    cur = cur.next
+
 proc ptrToStr(label: string, p: pointer): string =
   if p == nil:
     result = label & "<nil>"
@@ -21,17 +27,17 @@ proc `$`*(stk: StackPtr): string =
     if stk == nil:
       result = "<nil>"
     else:
-      result = "{" & stk.name & ":" & ptrToStr(" tos.next=", stk.tos.next)
+      result = "{" & stk.name & ":" & ptrToStr(" stk.tos=", addr stk.tos) &
+        ptrToStr(" tos.next=", stk.tos.next)
 
       var firstTime = true
       var cur = stk.tos.next
       var sep = " "
-      while cur != addr stk.tos:
+      for cur in stk:
         result &= ptrToStr(sep, cur)
         if firstTime:
           firstTime = false
           sep= ", "
-        cur = cur.next
 
       result &= "}"
 
@@ -52,7 +58,7 @@ proc newMpmcStack*(name: string): StackPtr =
 
 proc delMpmcStack*(stk: StackPtr) =
   proc dbg(s:string) = echo stk.name & ".delMpmcStack:" & s
-  when DBG: dbg "+"
+  when DBG: dbg "+ stk=" & $stk
 
   doAssert(stk.isEmpty())
   GcUnref(stk.name)
@@ -65,9 +71,10 @@ proc push*(stk: StackPtr,  node: LinkNodePtr) =
   proc dbg(s:string) = echo stk.name & ".push:" & s
   when DBG: dbg "+ stk=" & $stk & ptrToStr(" node=", node)
 
-  # Playing it safe using MemModel ACQ_REL
-  node.next = node
-  atomicExchange[LinkNodePtr](addr stk.tos.next, addr node.next, addr node.next, ATOMIC_ACQ_REL)
+  if node != nil:
+    # Playing it safe using MemModel ACQ_REL
+    node.next = node
+    atomicExchange[LinkNodePtr](addr stk.tos.next, addr node.next, addr node.next, ATOMIC_ACQ_REL)
 
   when DBG: dbg "- stk=" & $stk
 
@@ -85,7 +92,6 @@ proc pop*(stk: StackPtr): LinkNodePtr =
 
 when isMainModule:
   import unittest
-
 
   type
     TestObjPtr = ptr TestObj
@@ -105,11 +111,13 @@ when isMainModule:
     test "newMpcStack":
       var stk = newMpmcStack("stk")
       check(stk.isEmpty())
+      delMpmcStack(stk)
     
     test "pop from empty stk":
       var stk = newMpmcStack("stk")
       var sn = stk.pop()
       check(sn == nil)
+      delMpmcStack(stk)
     
     test "push pop":
       
@@ -121,6 +129,7 @@ when isMainModule:
       var snr = stk.pop().toTestObjPtr()
       check(snr != nil)
       check(snr.id == 1)
+      delMpmcStack(stk)
     
     test "push push pop push pop pop":
       var stk = newMpmcStack("stk")
@@ -131,3 +140,4 @@ when isMainModule:
       check(stk.pop().toTestObjPtr().id == 3)
       check(stk.pop().toTestObjPtr().id == 1)
       check(stk.isEmpty())
+      delMpmcStack(stk)
