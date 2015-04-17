@@ -98,7 +98,7 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
     cond[].initCond()
     lock[].initLock()
 
-  newMpscFifo(name, arena, owned, cond, lock, blockIfEmpty)
+  newMpscFifo(name, arena, owned, cond, lock, blocking)
 
 proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
   ## Create a new Fifo will block on rmv's if empty
