@@ -54,6 +54,9 @@ task "bm1", "compile and run bm1":
 task "bm2", "compile and run bm2":
   compileRun("tests/bm2")
 
+task "bm3", "compile and run bm3":
+  compileRun("tests/bm3")
+
 task "mpscfifo", "build, run mpscfifo":
   compileNim("./mpscfifo")
   runNim("./mpscfifo")
