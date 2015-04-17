@@ -13,17 +13,11 @@
 ##
 ## ....
 ##
-# At this time I couldn't figure out a good way for
-# addTail to return a boolean indicating if the msg
-# was added to an empty queue. The problem is empty
-# is defined by head.next == nil but we add to the
-# tail and in this MPSC queue we can't make two items
-# atomic at the same time. So for now we'll not
-# have that information.
 
 import msg, msgarena, linknode, locks, strutils
 
-const DBG = false
+const
+  DBG = false
 
 type
   Blocking* = enum
@@ -158,7 +152,7 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
   proc dbg(s:string) = echo mq.name & ".rmvNode:" & s
   when DBG: dbg "+ mq=" & $mq
 
-  block retry:
+  while true:
     var head = mq.head
     when DBG: dbg " head=" & $head
     # serialization-point wrt producers, acquire
@@ -166,20 +160,26 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
 
     when DBG: dbg " next=" & $next
     if next != nil:
-      if blocking == blockIfEmpty:
-        # If mq.head.next.next == nil we are getting the last
-        # node so we're empty.
-        # TODO: There is a race but ignore for the moment
-        atomicStoreN(addr mq.empty, next.next == nil, ATOMIC_RELEASE)
-
-      # Guess that it will be empty
-
       # Not empty mq.head.next.extra is the users data
       # and it will be returned in the stub LinkNode
       # pointed to by mq.head.
 
-      # next (aka mq.head.next) is the new stub LinkNode
+      if mq.blocking == blockIfEmpty:
+        # Note: here we check the mq.blocking field not the blocking
+        # parameter to this proc. We do this because even if the
+        # blocking parameter is nilIfEmpty we must still set mq.empty
+        # properly if the queue itself is blocking. Otherwise addNode
+        # won't signal the condition because mq.empty doesn't change
+        # and we'll hang.
+        #
+        # Here we set mq.empty to true if mq.head.next.next == nil
+        # as this means we are getting the last node.
+        atomicStoreN(addr mq.empty, next.next == nil, ATOMIC_RELEASE)
+
+      # Have head point to next (aka mq.head.next) as it will be the
+      # new stub LinkNode
       mq.head = next
+
       # And head, the old stub LinkNode aka mq.head is result
       # and we set result.next to nil so the link node is
       # ready to be reused and result.extra contains the
@@ -187,8 +187,12 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
       result = head
       result.next = nil
       result.extra = next.extra
+
+      # We've got a node break out of the loop
+      break
     else:
-      if blocking == blockIfEmpty and mq.lock != nil and mq.cond != nil:
+      if blocking == blockIfEmpty:
+        # TODO: Maybe throw an exception if lock and or cond are nil?
         mq.lock[].acquire()
         atomicStoreN(addr mq.empty, true, ATOMIC_RELEASE)
         while mq.empty:
@@ -196,7 +200,12 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
           mq.cond[].wait(mq.lock[])
           when DBG: dbg "DONE waiting"
         mq.lock[].release()
-        break retry
+
+        # Continue in the loop
+      else:
+        # Do not block so return nil
+        result = nil
+        break
 
   when DBG: dbg "- ln=" & $result & " mq=" & $mq
 
