@@ -4,7 +4,7 @@
 import linknode, typeinfo, strutils
 
 const
-  DBG = false
+  DBG = true
 
 type
   StackPtr* = ptr Stack

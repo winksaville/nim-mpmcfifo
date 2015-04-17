@@ -1,8 +1,12 @@
-import msg, msgarena, msgqueue, msglooper, benchmark, os, locks
+import msg, linknode, mpscfifo, msgarena, msglooper, benchmark, os, locks
+
+# include bmSuite so we can use it inside t(name: string)
+include "bmsuite"
 
 const
-  runTime = 30.0
-  threadCount = 3
+  runTime = 2.00 #30.0
+  warmupTime = 0.0 #0.25
+  threadCount = 1
   testStatsCount = 1
 
 var
@@ -13,17 +17,14 @@ var
 var
   ml1PmCount = 0
 proc ml1Pm(msg: MsgPtr) =
-  #echo "ml1Pm: **** msg=", msg
+  echo "ml1Pm: **** msg=", msg
   ml1PmCount += 1
-  msg.rspQ.addTail(msg)
+  msg.rspq.add(msg)
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
-ml1RsvQ = newMsgQueue("ml1RsvQ", ml1.cond, ml1.lock)
+ml1RsvQ = newMpscFifo("ml1RsvQ", ma)
 ml1.addProcessMsg(ml1Pm, ml1RsvQ)
-
-# include bmSuite so we can use it inside t(name: string)
-include "bmsuite"
 
 type
   TObj = object
@@ -35,29 +36,34 @@ proc newTObj(name: string, index: int): TObj =
   result.index = cast[int32](index and 0xFFFFFFFF)
 
 proc t(tobj: TObj) {.thread.} =
-  #echo "t+ tobj=", tobj
+  echo "t+ tobj=", tobj
 
-  bmSuite tobj.name, 1.0:
+  bmSuite tobj.name, warmupTime:
     echo suiteObj.suiteName & ".suiteObj=" & $suiteObj
     var
       msg: MsgPtr
-      rspQ: QueuePtr
+      rspq: QueuePtr
       tsa: array[0..testStatsCount-1, TestStats]
 
     setup:
-      rspQ = newMsgQueue("rspQ-" & suiteObj.suiteName)
+      rspq = newMpscFifo("rspq-" & suiteObj.suiteName, ma)
       msg = ma.getMsg(tobj.index, 0)
-      msg.rspQ = rspQ
+      msg.rspq = rspq
 
     teardown:
       ma.retMsg(msg)
-      rspQ.delMsgQueue()
+      rspq.delMpscFifo()
 
-    test "ping-pong", runTime, tsa:
-      ml1RsvQ.addTail(msg)
-      msg = rspQ.rmvHead()
+    # One loop for the moment
+    test "ping-pong", 1, tsa: #runTime, tsa:
+      ml1RsvQ.add(msg)
+      echo "waiting for response!!"
+      while true:
+        msg = rspq.rmv()
+        if msg != nil:
+          break
 
-  #echo "t:- tobj=", tobj
+  echo "t:- tobj=", tobj
 
 var
   idx = 0
@@ -71,6 +77,6 @@ sleep(round(runTime * 1000.0 * 1.20))
 
 echo "cleanup ml1PmCount=", ml1PmCount
 
-ml1RsvQ.delMsgQueue()
+ml1RsvQ.delMpscFifo()
 ml1.delMsgLooper()
 ma.delMsgArena()

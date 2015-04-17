@@ -3,6 +3,17 @@
 # "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
 import msg, linknode, mpscfifo, msgarena, benchmark
 
+type
+  O = object of RootObj
+    i: int
+
+var
+  o: O
+
+#o = cast[O](nil)
+
+echo "o=", o
+
 suite "mpscfifo", 0.25:
   var
     ma: MsgArenaPtr

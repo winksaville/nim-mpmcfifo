@@ -7,7 +7,7 @@ type
 
   MsgPtr* = ptr Msg
   Msg* = object of RootObj
-    rspQ*: QueuePtr
+    rspq*: QueuePtr
     cmd*: int32
 
 proc ptrToStr(label: string, p: pointer): string =
