@@ -3,7 +3,7 @@
 import msg, linknode, mpmcstack, locks, strutils
 
 const
-  DBG = true
+  DBG = false
   msgArenaSize = 32
 
 type

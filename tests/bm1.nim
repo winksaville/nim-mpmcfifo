@@ -24,7 +24,7 @@ suite "mpscfifo", 0.25:
 
   setup:
     ma = newMsgArena()
-    mq = newMpscFifo("fifo", ma)
+    mq = newMpscFifo("fifo", ma, nilIfEmpty)
     msg = ma.getMsg(1, 0)
     ln = ma.getLinkNode(nil, msg)
   teardown:
@@ -41,7 +41,7 @@ suite "mpscfifo", 0.25:
 
   setup:
     ma = newMsgArena()
-    mq = newMpscFifo("fifo", ma)
+    mq = newMpscFifo("fifo", ma, nilIfEmpty)
     msg = ma.getMsg(2, 0)
   teardown:
     ma.retMsg(msg)

@@ -23,16 +23,16 @@
 
 import msg, msgarena, linknode, locks, strutils
 
-const DBG = true
+const DBG = false
 
 type
-  Blocking = enum
+  Blocking* = enum
     blockIfEmpty, nilIfEmpty
 
   MsgQueue* = object of Queue
     name*: string
-    blocking: Blocking
-    empty: bool
+    blocking*: Blocking
+    empty*: bool
     ownsCondAndLock*: bool
     cond*: ptr TCond
     lock*: ptr TLock
