@@ -1,11 +1,6 @@
 import os, locks
 import msg, mpscfifo, msgarena
 
-#when not defined(release):
-#  const DBG = true
-#else:
-#  const DBG = false
-
 const
   DBG = false
   listMsgProcessorMaxLen = 10
@@ -72,7 +67,7 @@ proc looper(ml: MsgLooperPtr) =
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
-      var msg = mp.mq.rmv()
+      var msg = mp.mq.rmv(nilIfEmpty)
       if msg != nil:
         processedAtLeastOneMsg = true
         when DBG: dbg "processing msg=" & $msg
