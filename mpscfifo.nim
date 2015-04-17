@@ -67,8 +67,6 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
   proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
   when DBG: dbg "+"
 
-  mq.name = "heck"
-  echo "mq=", mq
   mq.name = name
   mq.arena = arena
   mq.blocking = blocking
@@ -168,10 +166,11 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
 
     when DBG: dbg " next=" & $next
     if next != nil:
-      # If mq.head.next.next == nil we are getting the last
-      # node so we're empty.
-      # TODO: There is a race but ignore for the moment
-      atomicStoreN(addr mq.empty, next.next == nil, ATOMIC_RELEASE)
+      if blocking == blockIfEmpty:
+        # If mq.head.next.next == nil we are getting the last
+        # node so we're empty.
+        # TODO: There is a race but ignore for the moment
+        atomicStoreN(addr mq.empty, next.next == nil, ATOMIC_RELEASE)
 
       # Guess that it will be empty
 
