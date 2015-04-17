@@ -4,8 +4,9 @@ var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
     "tests/nimcache", "tests/testatomics",
     "tests/bm1", "tests/bm2"]
-  buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
-  #buildFlags = "-d:release --verbosity:3 --hints:off --warnings:on --threads:on --embedsrc --lineDir:on --parallelBuild:1"
+  buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
+  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
+  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on --parallelBuild:1"
 
   docFlags = ""
   docFiles: seq[string] = @[]
