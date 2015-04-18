@@ -130,20 +130,20 @@ proc retMsg*(ma: MsgArenaPtr, msg: MsgPtr) =
     # asynchronously to executing this method. Although I haven't been
     # able to prove that:
     #   "SIGSEGV: Illegal storate access. (Attempt to read from nil?)"
-    echo ptrToStr("retMsg: 1 ma=", ma)
+    #echo ptrToStr("retMsg: 1 ma=", ma)
     var msgA = ma.getMsgArrayPtr()
-    echo ptrToStr("retMsg: 2 msgA=", msgA)
-    echo "retMsg: ma.msgCount=", ma.msgCount
+    #echo ptrToStr("retMsg: 2 msgA=", msgA)
+    #echo "retMsg: ma.msgCount=", ma.msgCount
     var len = msgA[].len()
-    echo "retMsg: msgA[].len=", len
+    #echo "retMsg: msgA[].len=", len
     if ma.msgCount < len:
-      echo "retMsg: add to msgA msg=", msg
+    #  echo "retMsg: add to msgA msg=", msg
       msg.rspQ = nil
       msg.cmd = -1
       msgA[ma.msgCount] = msg
       ma.msgCount += 1
     else:
-      echo "retMsg: delmsg"
+    #  echo "retMsg: delmsg"
       delMsg(msg)
       
   when DBG: echo "retMsg: releasing lock"

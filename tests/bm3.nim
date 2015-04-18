@@ -4,9 +4,10 @@ import msg, linknode, mpscfifo, msgarena, msglooper, benchmark, os, locks
 include "bmsuite"
 
 const
-  runTime = 60.0 * 60.0 * 2.0 #30.0
+  #runTime = 60.0 * 60.0 * 2.0
+  runTime = 30.0
   warmupTime = 0.25
-  threadCount = 1
+  threadCount = 48
   testStatsCount = 1
 
 var
@@ -35,7 +36,7 @@ proc newTObj(name: string, index: int): TObj =
   result.index = cast[int32](index and 0xFFFFFFFF)
 
 proc t(tobj: TObj) {.thread.} =
-  echo "t+ tobj=", tobj
+  #echo "t+ tobj=", tobj
 
   bmSuite tobj.name, warmupTime:
     echo suiteObj.suiteName & ".suiteObj=" & $suiteObj
@@ -52,7 +53,7 @@ proc t(tobj: TObj) {.thread.} =
 
     teardown:
       ma.retMsg(msg)
-      rspq.delMpscFifo()
+      #rspq.delMpscFifo()
 
     # One loop for the moment
     test "ping-pong", runTime, tsa:
@@ -63,7 +64,7 @@ proc t(tobj: TObj) {.thread.} =
       #echo rspq.name & ": $$$$ msg=" & $msg
 
 
-  echo "t:- tobj=", tobj
+  #echo "t:- tobj=", tobj
 
 var
   idx = 0
@@ -73,7 +74,7 @@ for idx in 0..threads.len-1:
   var tobj = newTObj("Producer" & $idx, idx)
   createThread[TObj](threads[idx], t, tobj)
 
-sleep(round(runTime * 1000.0 * 1.1))
+sleep(round(((runTime * 1000.0) * 1.1) + 2000.0))
 
 echo "cleanup ml1ConsumerCount=", ml1ConsumerCount
 
