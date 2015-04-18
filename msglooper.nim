@@ -1,11 +1,6 @@
 import os, locks
 import msg, mpscfifo, msgarena
 
-#when not defined(release):
-#  const DBG = true
-#else:
-#  const DBG = false
-
 const
   DBG = false
   listMsgProcessorMaxLen = 10
@@ -24,6 +19,7 @@ type
     name: string
     initialized: bool
     done: bool
+    condBool* : ptr bool
     cond*: ptr TCond
     lock*: ptr TLock
     listMsgProcessorLen: int
@@ -55,10 +51,12 @@ proc looper(ml: MsgLooperPtr) =
     ml.listMsgProcessorLen = 0
     ml.listMsgProcessor = cast[ptr array[0..listMsgProcessorMaxLen-1,
               MsgProcessorPtr]](allocShared(sizeof(MsgProcessorPtr) * listMsgProcessorMaxLen))
-    ml.lock = cast[ptr TLock](allocShared(sizeof(TLock)))
-    ml.lock[].initLock()
+    ml.condBool = cast[ptr bool](allocShared(sizeof(bool)))
+    ml.condBool[] = false
     ml.cond = cast[ptr TCond](allocShared(sizeof(TCond)))
     ml.cond[].initCond()
+    ml.lock = cast[ptr TLock](allocShared(sizeof(TLock)))
+    ml.lock[].initLock()
     when DBG: dbg "signal gInitCond"
     ml.initialized = true;
     gInitCond.signal()
@@ -72,7 +70,7 @@ proc looper(ml: MsgLooperPtr) =
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
-      var msg = mp.mq.rmv()
+      var msg = mp.mq.rmv(nilIfEmpty)
       if msg != nil:
         processedAtLeastOneMsg = true
         when DBG: dbg "processing msg=" & $msg
@@ -90,7 +88,7 @@ proc looper(ml: MsgLooperPtr) =
       # last element. But its tricky since the looper can be
       # managing mutliple queues.
       ml.lock[].acquire
-      block:
+      while not ml.condBool[]:
         when DBG: dbg "waiting"
         ml.cond[].wait(ml.lock[])
         when DBG: dbg "done-waiting"

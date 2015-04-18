@@ -8,4 +8,6 @@ nimcache/
 /mpmcstack
 /mpscfifo
 /tests/testatomics
-/tests/t1
+/tests/bm1
+/tests/bm2
+/tests/bm3

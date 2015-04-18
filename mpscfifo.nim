@@ -13,21 +13,23 @@
 ##
 ## ....
 ##
-# At this time I couldn't figure out a good way for
-# addTail to return a boolean indicating if the msg
-# was added to an empty queue. The problem is empty
-# is defined by head.next == nil but we add to the
-# tail and in this MPSC queue we can't make two items
-# atomic at the same time. So for now we'll not
-# have that information.
 
 import msg, msgarena, linknode, locks, strutils
 
-const DBG = false
+const
+  DBG = false
 
 type
+  Blocking* = enum
+    blockIfEmpty, nilIfEmpty
+
   MsgQueue* = object of Queue
     name*: string
+    blocking*: Blocking
+    ownsCondAndLock*: bool
+    condBool*: ptr bool ## True if empty to !empty transition, false !empty to empty
+    cond*: ptr TCond
+    lock*: ptr TLock
     arena: MsgArenaPtr
     head*: LinkNodePtr
     tail*: LinkNodePtr
@@ -44,13 +46,16 @@ proc `$`*(mq: MsgQueuePtr): string =
       "}"
 
 proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
+  ## TODO: Use mq.condBool???
   ## Check if empty is only useful if its known that
   ## no other threads are using the queue. Therefore
   ## this is private and only used in delMpscFifo and
   ## testing.
   result = mq.head.next == nil
 
-proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
+proc newMpscFifo*(name: string, arena: MsgArenaPtr,
+    owner: bool, condBool: ptr bool, cond: ptr TCond, lock: ptr TLock,
+    blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
   var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
   proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
@@ -58,12 +63,41 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
 
   mq.name = name
   mq.arena = arena
+  mq.blocking = blocking
+  mq.ownsCondAndLock = owner
+  mq.condBool = condBool
+  mq.cond = cond
+  mq.lock = lock
   var ln = mq.arena.getLinkNode(nil, nil)
   mq.head = ln
   mq.tail = ln
   result = mq
 
   when DBG: dbg "- mq=" & $mq
+
+proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
+    MsgQueuePtr =
+  ## Create a new Fifo
+  var
+    owned = false
+    condBool: ptr bool = nil
+    cond: ptr TCond = nil
+    lock: ptr TLock = nil
+
+  if blocking == blockIfEmpty:
+    owned = true
+    condBool = cast[ptr bool](allocShared(sizeof(bool)))
+    cond = cast[ptr TCond](allocShared(sizeof(TCond)))
+    lock = cast[ptr TLock](allocShared(sizeof(TLock)))
+    condBool[] = false
+    cond[].initCond()
+    lock[].initLock()
+
+  result = newMpscFifo(name, arena, owned, condBool, cond, lock, blocking)
+
+proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
+  ## Create a new Fifo will block on rmv's if empty
+  newMpscFifo(name, arena, blockIfEmpty)
 
 proc delMpscFifo*(qp: QueuePtr) =
   var mq = cast[MsgQueuePtr](qp)
@@ -72,6 +106,15 @@ proc delMpscFifo*(qp: QueuePtr) =
 
   doAssert(mq.isEmpty())
   mq.arena.retLinkNode(mq.head)
+  if mq.ownsCondAndLock:
+    if mq.condBool != nil:
+      freeShared(mq.condBool)
+    if mq.cond != nil:
+      mq.cond[].deinitCond()
+      freeShared(mq.cond)
+    if mq.lock != nil:
+      mq.lock[].deinitLock()
+      freeShared(mq.lock)
   mq.arena = nil
   mq.head = nil
   mq.tail = nil
@@ -90,6 +133,15 @@ proc addNode*(q: QueuePtr, ln: LinkNodePtr) =
     # serialization-piont wrt to the single consumer, acquire-release
     var prevTail = atomicExchangeN(addr mq.tail, ln, ATOMIC_ACQ_REL)
     atomicStoreN(addr prevTail.next, ln, ATOMIC_RELEASE)
+    if mq.blocking == blockIfEmpty:
+      mq.lock[].acquire()
+      var prevCondBool = atomicExchangeN(mq.condBool, true, ATOMIC_RELEASE)
+      #if not prevCondBool:
+      block:
+        # We've transitioned from false to true so signal
+        when DBG: dbg "  NOT-EMPTY signal cond"
+        mq.cond[].signal()
+      mq.lock[].release
 
     when DBG: dbg "- mq=" & $mq
 
@@ -100,47 +152,103 @@ proc add*(q: QueuePtr, msg: MsgPtr) =
     var ln = mq.arena.getLinkNode(nil, msg)
     addNode(q, ln)
 
-proc rmvNode*(q: QueuePtr): LinkNodePtr =
-  ## Return the next fifo link node or nil if empty
-  ## May only be called from consumer.
+proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
+  ## Return the next msg from the fifo if the queue is
+  ## empty block of blockOnEmpty is true else return nil
+  ##
+  ## May only be called from the consumer
   var mq = cast[MsgQueuePtr](q)
   proc dbg(s:string) = echo mq.name & ".rmvNode:" & s
   when DBG: dbg "+ mq=" & $mq
 
-  var head = mq.head
-  when DBG: dbg " head=" & $head
-  # serialization-point wrt producers, acquire
-  var next = cast[LinkNodePtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
-  when DBG: dbg " next=" & $next
-  if next != nil:
-    # Not empty mq.head.next.extra is the users data
-    # and it will be returned in the stub LinkNode
-    # pointed to by mq.head.
+  while true:
+    var head = mq.head
+    when DBG: dbg " head=" & $head
+    # serialization-point wrt producers, acquire
+    var next = cast[LinkNodePtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
 
-    # next (aka mq.head.next) is the new stub LinkNode
-    mq.head = next
-    # And head, the old stub LinkNode aka mq.head is result
-    # and we set result.next to nil so the link node is
-    # ready to be reused and result.extra contains the
-    # users data i.e. mq.head.next.extra.
-    result = head
-    result.next = nil
-    result.extra = next.extra
-  else:
-    # Empty
-    result = nil
+    when DBG: dbg " next=" & $next
+    if next != nil:
+      # Not empty mq.head.next.extra is the users data
+      # and it will be returned in the stub LinkNode
+      # pointed to by mq.head.
+
+      if mq.blocking == blockIfEmpty:
+        # Note: here we check the mq.blocking field not the blocking
+        # parameter to this proc. We do this because even if the
+        # blocking parameter is nilIfEmpty we must still set mq.condBool
+        # properly if the queue itself is blocking. Otherwise addNode
+        # won't signal the condition because mq.condBool doesn't change
+        # and we'll hang.
+        #
+        # Here we set mq.condBool to false if we've just taken the last
+        # element from the queue.
+        mq.lock[].acquire()
+        if next.next == nil:
+          when DBG: dbg " EMPTY"
+          atomicStoreN(mq.condBool, false, ATOMIC_RELEASE)
+        mq.lock[].release()
+
+      # Have head point to next (aka mq.head.next) as it will be the
+      # new stub LinkNode
+      mq.head = next
+
+      # And head, the old stub LinkNode aka mq.head is result
+      # and we set result.next to nil so the link node is
+      # ready to be reused and result.extra contains the
+      # users data i.e. mq.head.next.extra.
+      result = head
+      result.next = nil
+      result.extra = next.extra
+
+      # We've got a node break out of the loop
+      break
+    else:
+      if blocking == blockIfEmpty:
+        # TODO: Maybe throw an exception if lock and or cond are nil?
+        mq.lock[].acquire()
+        while not mq.condBool[]:
+          when DBG: dbg "waiting"
+          mq.cond[].wait(mq.lock[])
+          when DBG: dbg "DONE waiting"
+        mq.lock[].release()
+
+        # Continue in the loop
+      else:
+        # Do not block so return nil
+        result = nil
+        break
+
   when DBG: dbg "- ln=" & $result & " mq=" & $mq
 
-proc rmv*(q: QueuePtr): MsgPtr =
-  ## Return the next msg from the fifo or nil if empty
+proc rmvNode*(q: QueuePtr): LinkNodePtr {.inline.} =
+  ## Return the next link node from the fifo or if empty and
+  ## this is a non-blocking queue then returns nil.
+  ##
   ## May only be called from the consumer
   var mq = cast[MsgQueuePtr](q)
-  var ln = mq.rmvNode()
+  result = rmvNode(q, mq.blocking)
+
+proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr {.inline.} =
+  ## Return the next msg from the fifo if the queue is
+  ## empty block of blockOnEmpty is true else return nil
+  ##
+  ## May only be called from the consumer
+  var mq = cast[MsgQueuePtr](q)
+  var ln = mq.rmvNode(blocking)
   if ln == nil:
     result = nil
   else:
     result = toMsg(ln.extra)
     mq.arena.retLinkNode(ln)
+
+proc rmv*(q: QueuePtr): MsgPtr {.inline.} =
+  ## Return the next msg from the fifo or if empty and
+  ## this is a non-blocking queue then returns nil.
+  ##
+  ## May only be called from the consumer
+  var mq = cast[MsgQueuePtr](q)
+  result = rmv(q, mq.blocking)
 
 when isMainModule:
   import unittest
@@ -157,40 +265,57 @@ when isMainModule:
     #  var mq = newMpscFifo("mq", ma)
     #  mq.delMpscFifo()
 
-    #test "test new queue is empty":
-    #  var mq = newMpscFifo("mq", ma)
+    test "test new queue is empty":
+      var mq = newMpscFifo("mq", ma)
+      var msg: MsgPtr
+
+      # rmv from empty queue
+      msg = mq.rmv(nilIfEmpty)
+      check(mq.isEmpty())
+
+      mq.delMpscFifo()
+
+    test "test new queue is empty twice":
+      var mq = newMpscFifo("mq", ma)
+      var msg: MsgPtr
+
+      # rmv from empty queue
+      msg = mq.rmv(nilIfEmpty)
+      check(mq.isEmpty())
+
+      # rmv from empty queue
+      msg = mq.rmv(nilIfEmpty)
+      check(mq.isEmpty())
+
+      mq.delMpscFifo()
+
+    test "test add, rmv blocking":
+      var mq = newMpscFifo("mq", ma, blockIfEmpty)
+      var msg: MsgPtr
+
+      # add 1
+      msg = ma.getMsg(1, 0)
+      mq.add(msg)
+      check(not mq.isEmpty())
+
+      # rmv 1
+      msg = mq.rmv()
+      check(mq.isEmpty())
+      check(msg.cmd == 1)
+      ma.retMsg(msg)
+
+      mq.delMpscFifo()
+
+    test "test add, rmv non-blocking":
+      var mq = newMpscFifo("mq", ma, nilIfEmpty)
     #  var msg: MsgPtr
 
-    #  # rmv from empty queue
-    #  msg = mq.rmv()
-    #  check(mq.isEmpty())
-
-    #  mq.delMpscFifo()
-
-    #test "test new queue is empty twice":
-    #  var mq = newMpscFifo("mq", ma)
-    #  var msg: MsgPtr
-
-    #  # rmv from empty queue
-    #  msg = mq.rmv()
-    #  check(mq.isEmpty())
-
-    #  # rmv from empty queue
-    #  msg = mq.rmv()
-    #  check(mq.isEmpty())
-
-    #  mq.delMpscFifo()
-
-    #test "test add, rmv":
-    #  var mq = newMpscFifo("mq", ma)
-    #  var msg: MsgPtr
-
-    #  # add 1
+    #   add 1
     #  msg = ma.getMsg(1, 0)
     #  mq.add(msg)
     #  check(not mq.isEmpty())
 
-    #  # rmv 1
+    #   rmv 1
     #  msg = mq.rmv()
     #  check(mq.isEmpty())
     #  check(msg.cmd == 1)
@@ -198,8 +323,46 @@ when isMainModule:
 
     #  mq.delMpscFifo()
 
-    #test "test add, rmv node":
-    #  var mq = newMpscFifo("mq", ma)
+    #test "test add, rmv node blocking 0":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
+
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retLinkNode(ln)
+    #  ma.retMsg(msg)
+
+    #  mq.delMpscFifo()
+
+    #test "test add, rmv node blocking 1":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
+
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  mq.delMpscFifo()
+
+    #test "test add, rmv node non-blocking":
+    #  var mq = newMpscFifo("mq", ma, nilIfEmpty)
     #  var msg = ma.getMsg(1, 0)
     #  var ln = ma.getLinkNode(nil, msg)
     #  mq.addNode(ln)
@@ -214,33 +377,33 @@ when isMainModule:
 
     #  mq.delMpscFifo()
 
-    test "test reusing node":
-      var mq = newMpscFifo("mq", ma)
-      var msg: MsgPtr
-      var ln: LinkNodePtr
+    #test "test reusing node non-blocking":
+    #  var mq = newMpscFifo("mq", ma, nilIfEmpty)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
 
-      msg = ma.getMsg(1, 0)
-      ln = ma.getLinkNode(nil, msg)
-      mq.addNode(ln)
-      ln = mq.rmvNode()
-      msg = toMsg(ln.extra)
-      check(msg.cmd == 1)
-      ma.retMsg(msg)
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  ln = mq.rmvNode()
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
 
-      when true:
-        msg = ma.getMsg(2, 0)
-        ln.initLinkNode(nil, msg)
-        mq.addNode(ln)
-        ln = mq.rmvNode()
-        msg = toMsg(ln.extra)
-        check(msg.cmd == 2)
+    #  when true:
+    #    msg = ma.getMsg(2, 0)
+    #    ln.initLinkNode(nil, msg)
+    #    mq.addNode(ln)
+    #    ln = mq.rmvNode()
+    #    msg = toMsg(ln.extra)
+    #    check(msg.cmd == 2)
 
-      ma.retLinkNode(ln)
+    #  ma.retLinkNode(ln)
 
-      mq.delMpscFifo()
+    #  mq.delMpscFifo()
 
-    #test "test add, rmv, add, rmv":
-    #  var mq = newMpscFifo("mq", ma)
+    #test "test add, rmv, add, rmv, blocking":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
     #  var msg: MsgPtr
 
     #  # add 1
@@ -265,8 +428,34 @@ when isMainModule:
     #  check(msg.cmd == 2)
     #  ma.retMsg(msg)
 
-    #test "test add, rmv, add, rmv node":
-    #  var mq = newMpscFifo("mq", ma)
+    #test "test add, rmv, add, rmv, non-blocking":
+    #  var mq = newMpscFifo("mq", ma, nilIfEmpty)
+    #  var msg: MsgPtr
+
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 1
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+
+    #  # add 2
+    #  msg = ma.getMsg(2, 0)
+    #  mq.add(msg)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 2
+    #  msg = mq.rmv()
+    #  check(mq.isEmpty())
+    #  check(msg.cmd == 2)
+    #  ma.retMsg(msg)
+
+    #test "test add, rmv, add, rmv node, blocking":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
     #  var msg: MsgPtr
     #  var ln: LinkNodePtr
 
@@ -300,8 +489,43 @@ when isMainModule:
 
     #  mq.delMpscFifo()
 
-    #test "test add, rmv, add, add, rmv, rmv":
-    #  var mq = newMpscFifo("mq", ma)
+    #test "test add, rmv, add, rmv node, non-blocking":
+    #  var mq = newMpscFifo("mq", ma, nilIfEmpty)
+    #  var msg: MsgPtr
+    #  var ln: LinkNodePtr
+
+    #  # add 1
+    #  msg = ma.getMsg(1, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 1
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 1)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  # add 2
+    #  msg = ma.getMsg(2, 0)
+    #  ln = ma.getLinkNode(nil, msg)
+    #  mq.addNode(ln)
+    #  check(not mq.isEmpty())
+
+    #  # rmv 2
+    #  ln = mq.rmvNode()
+    #  check(mq.isEmpty())
+    #  msg = toMsg(ln.extra)
+    #  check(msg.cmd == 2)
+    #  ma.retMsg(msg)
+    #  ma.retLinkNode(ln)
+
+    #  mq.delMpscFifo()
+
+    #test "test add, rmv, add, add, rmv, rmv, blocking":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
     #  var msg: MsgPtr
 
     #  # add 1
@@ -323,11 +547,13 @@ when isMainModule:
     #  mq.add(msg)
     #  check(not mq.isEmpty())
 
-    #  # rmv 2, rmv 3
+    #  # rmv 2
     #  msg = mq.rmv()
     #  check(msg.cmd == 2)
     #  check(not mq.isEmpty())
     #  ma.retMsg(msg)
+
+    #  # rmv 3
     #  msg = mq.rmv()
     #  check(msg.cmd == 3)
     #  check(mq.isEmpty())
@@ -335,8 +561,8 @@ when isMainModule:
 
     #  mq.delMpscFifo()
 
-    #test "test add, rmv, add, add, rmv, rmv node":
-    #  var mq = newMpscFifo("mq", ma)
+    #test "test add, rmv, add, add, rmv, rmv node, blocking":
+    #  var mq = newMpscFifo("mq", ma, blockIfEmpty)
     #  var msg: MsgPtr
     #  var ln: LinkNodePtr
 
@@ -372,6 +598,7 @@ when isMainModule:
     #  ma.retMsg(msg)
     #  ma.retLinkNode(ln)
 
+    #  # rmv 3
     #  ln = mq.rmvNode()
     #  check(mq.isEmpty())
     #  msg = toMsg(ln.extra)

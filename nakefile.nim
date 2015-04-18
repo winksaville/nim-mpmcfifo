@@ -1,9 +1,12 @@
 import nake
 
 var
-  buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack", "tests/nimcache", "tests/testatomics", "tests/t1"]
-  buildFlags = "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
-  #buildFlags = "-d:release --verbosity:3 --hints:off --warnings:on --threads:on --embedsrc --lineDir:on --parallelBuild:1"
+  buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
+    "tests/nimcache", "tests/testatomics",
+    "tests/bm1", "tests/bm2"]
+  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
+  buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
+  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on --parallelBuild:1"
 
   docFlags = ""
   docFiles: seq[string] = @[]
@@ -45,14 +48,14 @@ task "mpmcstack", "compile and run mpmcstack":
 task "testatomics", "compile and run testatomics":
   compileRun("tests/testatomics")
 
-task "t1", "compile and run t1":
-  compileRun("tests/t1")
+task "bm1", "compile and run bm1":
+  compileRun("tests/bm1")
 
-task "build-t1", "Build t1":
-  compileNim("tests/t1")
+task "bm2", "compile and run bm2":
+  compileRun("tests/bm2")
 
-task "run-t1", "Run t1":
-  runNim("tests/t1")
+task "bm3", "compile and run bm3":
+  compileRun("tests/bm3")
 
 task "mpscfifo", "build, run mpscfifo":
   compileNim("./mpscfifo")

@@ -1,4 +1,4 @@
-## Wait free stack of LinkNode's
+## Lock free stack of LinkNode's
 ##
 ## This implemenation uses a linked list of LinkNode's
 import linknode, typeinfo, strutils
@@ -31,14 +31,14 @@ proc `$`*(stk: StackPtr): string =
       result = "{" & stk.name & ":" & ptrToStr(" stk.tos=", addr stk.tos) &
         ptrToStr(" tos.next=", stk.tos.next)
 
-      var firstTime = true
-      var cur = stk.tos.next
-      var sep = " "
-      for cur in stk:
-        result &= ptrToStr(sep, cur)
-        if firstTime:
-          firstTime = false
-          sep= ", "
+      #var firstTime = true
+      #var cur = stk.tos.next
+      #var sep = " "
+      #for cur in stk:
+      #  result &= ptrToStr(sep, cur)
+      #  if firstTime:
+      #    firstTime = false
+      #    sep= ", "
 
       result &= "}"
 
@@ -74,22 +74,31 @@ proc push*(stk: StackPtr,  node: LinkNodePtr) =
 
   if node != nil:
     # Playing it safe using MemModel ACQ_REL
-    node.next = node
-    atomicExchange[LinkNodePtr](addr stk.tos.next, addr node.next, addr node.next, ATOMIC_ACQ_REL)
+    var oldTos = stk.tos.next
+    node.next = oldTos
+    while not atomicCompareExchangeN[LinkNodePtr](addr stk.tos.next, addr oldTos, node,
+        false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+      oldTos = stk.tos.next
+      node.next = oldTos
 
   when DBG: dbg "- stk=" & $stk
 
 proc pop*(stk: StackPtr): LinkNodePtr =
   ## Pop top of stack or nil if stack is empty
   proc dbg(s:string) = echo stk.name & ".pop:" & s
-  when DBG: dbg "+ stk=" & $stk
+  when DBG: dbg " + stk=" & $stk
 
   # Playing it safe using MemModel ACQ_REL
-  atomicExchange[LinkNodePtr](addr stk.tos.next, addr stk.tos.next.next, addr result, ATOMIC_ACQ_REL)
+  result = stk.tos.next
+  var newTos = result.next
+  while not atomicCompareExchangeN[LinkNodePtr](addr stk.tos.next, addr result, newTos,
+      false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+    result = stk.tos.next
+    newTos = result.next
   if result == addr stk.tos:
     result = nil
 
-  when DBG: dbg "- " & ptrToStr("result=", result) & " stk=" & $stk
+  when DBG: dbg " - " & ptrToStr("result=", result) & " stk=" & $stk
 
 when isMainModule:
   import unittest
