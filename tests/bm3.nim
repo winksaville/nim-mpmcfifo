@@ -4,8 +4,8 @@ import msg, linknode, mpscfifo, msgarena, msglooper, benchmark, os, locks
 include "bmsuite"
 
 const
-  runTime = 2.00 #30.0
-  warmupTime = 0.0 #0.25
+  runTime = 60.0 * 60.0 * 2.0 #30.0
+  warmupTime = 0.25
   threadCount = 1
   testStatsCount = 1
 
@@ -16,13 +16,13 @@ var
 
 var ml1ConsumerCount = 0
 proc ml1Consumer(msg: MsgPtr) =
-  # echo "ml1Consumer: **** msg=", msg
+  #echo "ml1Consumer: **** msg=", msg
   ml1ConsumerCount += 1
   msg.rspq.add(msg)
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
-ml1RsvQ = newMpscFifo("ml1RsvQ", ma, false, ml1.cond, ml1.lock, blockIfEmpty)
+ml1RsvQ = newMpscFifo("ml1RsvQ", ma, false, ml1.condBool, ml1.cond, ml1.lock, blockIfEmpty)
 ml1.addProcessMsg(ml1Consumer, ml1RsvQ)
 
 type
@@ -41,8 +41,9 @@ proc t(tobj: TObj) {.thread.} =
     echo suiteObj.suiteName & ".suiteObj=" & $suiteObj
     var
       msg: MsgPtr
-      rspq: QueuePtr
+      rspq: MsgQueuePtr
       tsa: array[0..testStatsCount-1, TestStats]
+      cmd: int32 = 0
 
     setup:
       rspq = newMpscFifo("rspq-" & suiteObj.suiteName, ma, blockIfEmpty)
@@ -55,8 +56,12 @@ proc t(tobj: TObj) {.thread.} =
 
     # One loop for the moment
     test "ping-pong", runTime, tsa:
+      cmd += 1
+      msg.cmd = cmd
       ml1RsvQ.add(msg)
       msg = rspq.rmv()
+      #echo rspq.name & ": $$$$ msg=" & $msg
+
 
   echo "t:- tobj=", tobj
 
@@ -68,11 +73,11 @@ for idx in 0..threads.len-1:
   var tobj = newTObj("Producer" & $idx, idx)
   createThread[TObj](threads[idx], t, tobj)
 
-sleep(round(runTime * 1000.0 * 2.0))
+sleep(round(runTime * 1000.0 * 1.1))
 
 echo "cleanup ml1ConsumerCount=", ml1ConsumerCount
 
 # TODO: We're not ending cleanly so these can cause assertions.
-#ml1RsvQ.delMpscFifo()
-#ml1.delMsgLooper()
-#ma.delMsgArena()
+ml1RsvQ.delMpscFifo()
+ml1.delMsgLooper()
+ma.delMsgArena()

@@ -13,7 +13,7 @@ proc ml1Pm(msg: MsgPtr) =
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
-ml1RsvQ = newMpscFifo("ml1RsvQ", ma, false, ml1.cond, ml1.lock, blockIfEmpty)
+ml1RsvQ = newMpscFifo("ml1RsvQ", ma, false, ml1.condBool, ml1.cond, ml1.lock, blockIfEmpty)
 ml1.addProcessMsg(ml1Pm, ml1RsvQ)
 
 suite "msglooper", 0.0:

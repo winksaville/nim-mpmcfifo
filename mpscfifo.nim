@@ -26,8 +26,8 @@ type
   MsgQueue* = object of Queue
     name*: string
     blocking*: Blocking
-    empty*: bool
     ownsCondAndLock*: bool
+    condBool*: ptr bool ## True if empty to !empty transition, false !empty to empty
     cond*: ptr TCond
     lock*: ptr TLock
     arena: MsgArenaPtr
@@ -46,7 +46,7 @@ proc `$`*(mq: MsgQueuePtr): string =
       "}"
 
 proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
-  ## TODO: Use mq.empty???
+  ## TODO: Use mq.condBool???
   ## Check if empty is only useful if its known that
   ## no other threads are using the queue. Therefore
   ## this is private and only used in delMpscFifo and
@@ -54,7 +54,7 @@ proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
   result = mq.head.next == nil
 
 proc newMpscFifo*(name: string, arena: MsgArenaPtr,
-    owner: bool, cond: ptr TCond, lock: ptr TLock,
+    owner: bool, condBool: ptr bool, cond: ptr TCond, lock: ptr TLock,
     blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
   var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
@@ -64,8 +64,8 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
   mq.name = name
   mq.arena = arena
   mq.blocking = blocking
-  mq.empty = true
   mq.ownsCondAndLock = owner
+  mq.condBool = condBool
   mq.cond = cond
   mq.lock = lock
   var ln = mq.arena.getLinkNode(nil, nil)
@@ -80,17 +80,20 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
   ## Create a new Fifo
   var
     owned = false
+    condBool: ptr bool = nil
     cond: ptr TCond = nil
     lock: ptr TLock = nil
 
   if blocking == blockIfEmpty:
     owned = true
+    condBool = cast[ptr bool](allocShared(sizeof(bool)))
     cond = cast[ptr TCond](allocShared(sizeof(TCond)))
     lock = cast[ptr TLock](allocShared(sizeof(TLock)))
+    condBool[] = false
     cond[].initCond()
     lock[].initLock()
 
-  newMpscFifo(name, arena, owned, cond, lock, blocking)
+  result = newMpscFifo(name, arena, owned, condBool, cond, lock, blocking)
 
 proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
   ## Create a new Fifo will block on rmv's if empty
@@ -104,6 +107,8 @@ proc delMpscFifo*(qp: QueuePtr) =
   doAssert(mq.isEmpty())
   mq.arena.retLinkNode(mq.head)
   if mq.ownsCondAndLock:
+    if mq.condBool != nil:
+      freeShared(mq.condBool)
     if mq.cond != nil:
       mq.cond[].deinitCond()
       freeShared(mq.cond)
@@ -129,10 +134,14 @@ proc addNode*(q: QueuePtr, ln: LinkNodePtr) =
     var prevTail = atomicExchangeN(addr mq.tail, ln, ATOMIC_ACQ_REL)
     atomicStoreN(addr prevTail.next, ln, ATOMIC_RELEASE)
     if mq.blocking == blockIfEmpty:
-      var prevEmpty = atomicExchangeN(addr mq.empty, false, ATOMIC_RELEASE)
-      if prevEmpty and mq.cond != nil:
-        when DBG: dbg "  signal cond"
+      mq.lock[].acquire()
+      var prevCondBool = atomicExchangeN(mq.condBool, true, ATOMIC_RELEASE)
+      #if not prevCondBool:
+      block:
+        # We've transitioned from false to true so signal
+        when DBG: dbg "  NOT-EMPTY signal cond"
         mq.cond[].signal()
+      mq.lock[].release
 
     when DBG: dbg "- mq=" & $mq
 
@@ -167,14 +176,18 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
       if mq.blocking == blockIfEmpty:
         # Note: here we check the mq.blocking field not the blocking
         # parameter to this proc. We do this because even if the
-        # blocking parameter is nilIfEmpty we must still set mq.empty
+        # blocking parameter is nilIfEmpty we must still set mq.condBool
         # properly if the queue itself is blocking. Otherwise addNode
-        # won't signal the condition because mq.empty doesn't change
+        # won't signal the condition because mq.condBool doesn't change
         # and we'll hang.
         #
-        # Here we set mq.empty to true if mq.head.next.next == nil
-        # as this means we are getting the last node.
-        atomicStoreN(addr mq.empty, next.next == nil, ATOMIC_RELEASE)
+        # Here we set mq.condBool to false if we've just taken the last
+        # element from the queue.
+        mq.lock[].acquire()
+        if next.next == nil:
+          when DBG: dbg " EMPTY"
+          atomicStoreN(mq.condBool, false, ATOMIC_RELEASE)
+        mq.lock[].release()
 
       # Have head point to next (aka mq.head.next) as it will be the
       # new stub LinkNode
@@ -194,8 +207,7 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
       if blocking == blockIfEmpty:
         # TODO: Maybe throw an exception if lock and or cond are nil?
         mq.lock[].acquire()
-        atomicStoreN(addr mq.empty, true, ATOMIC_RELEASE)
-        while mq.empty:
+        while not mq.condBool[]:
           when DBG: dbg "waiting"
           mq.cond[].wait(mq.lock[])
           when DBG: dbg "DONE waiting"

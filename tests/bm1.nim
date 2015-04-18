@@ -3,6 +3,9 @@
 # "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
 import msg, linknode, mpscfifo, msgarena, benchmark
 
+const
+  timeLoops = 5.0
+
 suite "mpscfifo", 0.25:
   var
     ma: MsgArenaPtr
@@ -24,7 +27,7 @@ suite "mpscfifo", 0.25:
     ma.delMsgArena()
 
   # mpscfifo.test add/rmvNode blocking: ts={min=67cy mean=82cy minC=364 n=5375265}
-  test "test add/rmvNode blocking", 5.0, tsa:
+  test "test add/rmvNode blocking", timeLoops, tsa:
     mq.addNode(ln)
     ln = mq.rmvNode()
 
@@ -42,7 +45,7 @@ suite "mpscfifo", 0.25:
     ma.delMsgArena()
 
   # mpscfifo.test add/rmvNode non-blocking: ts={min=10cy mean=29cy minC=7763 n=5480653}
-  test "test add/rmvNode non-blocking", 5.0, tsa:
+  test "test add/rmvNode non-blocking", timeLoops, tsa:
     mq.addNode(ln)
     ln = mq.rmvNode()
 
@@ -57,7 +60,7 @@ suite "mpscfifo", 0.25:
     ma.delMsgArena()
 
   # mpscfifo.bm add/rmv blocking: ts={min=118cy mean=197cy minC=21 n=5193334}
-  test "bm add/rmv blocking", 5.0, tsa:
+  test "bm add/rmv blocking", timeLoops, tsa:
     mq.add(msg)
     msg = mq.rmv()
 
@@ -72,6 +75,6 @@ suite "mpscfifo", 0.25:
     ma.delMsgArena()
 
   # mpscfifo.bm add/rmv non-blocking: ts={min=67cy mean=93cy minC=6 n=5362014}
-  test "bm add/rmv non-blocking", 5.0, tsa:
+  test "bm add/rmv non-blocking", timeLoops, tsa:
     mq.add(msg)
     msg = mq.rmv()
