@@ -7,6 +7,7 @@ type
 
   MsgPtr* = ptr Msg
   Msg* = object of RootObj
+    next*: MsgPtr
     rspq*: QueuePtr
     cmd*: int32
 

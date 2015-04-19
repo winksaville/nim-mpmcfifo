@@ -25,7 +25,7 @@ suite "msglooper", 0.0:
   setup:
     echo suiteObj.suiteName & " setup:+"
     rspQ1 = newMpscFifo("rspQ1", ma, blockIfEmpty)
-    msg = ma.getMsg(1, 0)
+    msg = ma.getMsg(nil, nil, 1, 0)
     msg.rspQ = rspQ1
     echo suiteObj.suiteName & " setup:-"
 

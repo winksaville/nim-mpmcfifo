@@ -14,7 +14,7 @@
 ## ....
 ##
 
-import msg, msgarena, linknode, locks, strutils
+import msg, msgarena, locks, strutils
 
 const
   DBG = false
@@ -31,8 +31,8 @@ type
     cond*: ptr TCond
     lock*: ptr TLock
     arena: MsgArenaPtr
-    head*: LinkNodePtr
-    tail*: LinkNodePtr
+    head*: MsgPtr
+    tail*: MsgPtr
   MsgQueuePtr* = ptr MsgQueue
 
 proc `$`*(mq: MsgQueuePtr): string =
@@ -68,9 +68,9 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
   mq.condBool = condBool
   mq.cond = cond
   mq.lock = lock
-  var ln = mq.arena.getLinkNode(nil, nil)
-  mq.head = ln
-  mq.tail = ln
+  var mn = mq.arena.getMsg(nil, nil, 0, 0)
+  mq.head = mn
+  mq.tail = mn
   result = mq
 
   when DBG: dbg "- mq=" & $mq
@@ -105,7 +105,7 @@ proc delMpscFifo*(qp: QueuePtr) =
   when DBG: dbg "+ mq=" & $mq
 
   doAssert(mq.isEmpty())
-  mq.arena.retLinkNode(mq.head)
+  mq.arena.retMsg(mq.head)
   if mq.ownsCondAndLock:
     if mq.condBool != nil:
       freeShared(mq.condBool)
@@ -123,16 +123,19 @@ proc delMpscFifo*(qp: QueuePtr) =
 
   when DBG: dbg "-"
 
-proc addNode*(q: QueuePtr, ln: LinkNodePtr) =
+proc add*(q: QueuePtr, msg: MsgPtr) =
   ## Add the link node to the fifo
-  if ln != nil:
+  if msg != nil:
     var mq = cast[MsgQueuePtr](q)
     proc dbg(s:string) = echo mq.name & ".addNode:" & s
     when DBG: dbg "+ ln=" & $ln & " mq=" & $mq
 
+    # Be sure msg.next is nil as it must be
+    msg.next =  nil
+
     # serialization-piont wrt to the single consumer, acquire-release
-    var prevTail = atomicExchangeN(addr mq.tail, ln, ATOMIC_ACQ_REL)
-    atomicStoreN(addr prevTail.next, ln, ATOMIC_RELEASE)
+    var prevTail = atomicExchangeN(addr mq.tail, msg, ATOMIC_ACQ_REL)
+    atomicStoreN(addr prevTail.next, msg, ATOMIC_RELEASE)
     if mq.blocking == blockIfEmpty:
       mq.lock[].acquire()
       var prevCondBool = atomicExchangeN(mq.condBool, true, ATOMIC_RELEASE)
@@ -145,14 +148,7 @@ proc addNode*(q: QueuePtr, ln: LinkNodePtr) =
 
     when DBG: dbg "- mq=" & $mq
 
-proc add*(q: QueuePtr, msg: MsgPtr) =
-  ## Add msg to the fifo
-  if msg != nil:
-    var mq = cast[MsgQueuePtr](q)
-    var ln = mq.arena.getLinkNode(nil, msg)
-    addNode(q, ln)
-
-proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
+proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
   ## Return the next msg from the fifo if the queue is
   ## empty block of blockOnEmpty is true else return nil
   ##
@@ -165,7 +161,7 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
     var head = mq.head
     when DBG: dbg " head=" & $head
     # serialization-point wrt producers, acquire
-    var next = cast[LinkNodePtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
+    var next = cast[MsgPtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
 
     when DBG: dbg " next=" & $next
     if next != nil:
@@ -199,7 +195,8 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
       # users data i.e. mq.head.next.extra.
       result = head
       result.next = nil
-      result.extra = next.extra
+      result.rspq = next.rspq
+      result.cmd = next.cmd
 
       # We've got a node break out of the loop
       break
@@ -219,36 +216,16 @@ proc rmvNode*(q: QueuePtr, blocking: Blocking): LinkNodePtr =
         result = nil
         break
 
-  when DBG: dbg "- ln=" & $result & " mq=" & $mq
+  when DBG: dbg "- msg=" & $result & " mq=" & $mq
 
-proc rmvNode*(q: QueuePtr): LinkNodePtr {.inline.} =
+proc rmv*(q: QueuePtr): MsgPtr {.inline.} =
   ## Return the next link node from the fifo or if empty and
   ## this is a non-blocking queue then returns nil.
   ##
   ## May only be called from the consumer
   var mq = cast[MsgQueuePtr](q)
-  result = rmvNode(q, mq.blocking)
-
-proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr {.inline.} =
-  ## Return the next msg from the fifo if the queue is
-  ## empty block of blockOnEmpty is true else return nil
-  ##
-  ## May only be called from the consumer
-  var mq = cast[MsgQueuePtr](q)
-  var ln = mq.rmvNode(blocking)
-  if ln == nil:
-    result = nil
-  else:
-    result = toMsg(ln.extra)
-    mq.arena.retLinkNode(ln)
-
-proc rmv*(q: QueuePtr): MsgPtr {.inline.} =
-  ## Return the next msg from the fifo or if empty and
-  ## this is a non-blocking queue then returns nil.
-  ##
-  ## May only be called from the consumer
-  var mq = cast[MsgQueuePtr](q)
   result = rmv(q, mq.blocking)
+
 
 when isMainModule:
   import unittest
@@ -294,7 +271,7 @@ when isMainModule:
       var msg: MsgPtr
 
       # add 1
-      msg = ma.getMsg(1, 0)
+      msg = ma.getMsg(nil, nil, 1, 0)
       mq.add(msg)
       check(not mq.isEmpty())
 

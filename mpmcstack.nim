@@ -1,7 +1,7 @@
 ## Lock free stack of LinkNode's
 ##
 ## This implemenation uses a linked list of LinkNode's
-import linknode, typeinfo, strutils
+import msg, typeinfo, strutils
 
 const
   DBG = false
@@ -10,9 +10,9 @@ type
   StackPtr* = ptr Stack
   Stack* = object
     name*: string
-    tos*: LinkNode
+    tos*: Msg
 
-iterator items*(stk: StackPtr): LinkNodePtr {.inline.} =
+iterator items*(stk: StackPtr): MsgPtr {.inline.} =
   var cur = stk.tos.next
   while cur != addr stk.tos:
     yield cur
@@ -67,7 +67,7 @@ proc delMpmcStack*(stk: StackPtr) =
 
   when DBG: dbg "-"
 
-proc push*(stk: StackPtr,  node: LinkNodePtr) =
+proc push*(stk: StackPtr,  node: MsgPtr) =
   ## Push node to top of stack
   proc dbg(s:string) = echo stk.name & ".push:" & s
   when DBG: dbg "+ stk=" & $stk & ptrToStr(" node=", node)
@@ -76,14 +76,14 @@ proc push*(stk: StackPtr,  node: LinkNodePtr) =
     # Playing it safe using MemModel ACQ_REL
     var oldTos = stk.tos.next
     node.next = oldTos
-    while not atomicCompareExchangeN[LinkNodePtr](addr stk.tos.next, addr oldTos, node,
+    while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr oldTos, node,
         false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
       oldTos = stk.tos.next
       node.next = oldTos
 
   when DBG: dbg "- stk=" & $stk
 
-proc pop*(stk: StackPtr): LinkNodePtr =
+proc pop*(stk: StackPtr): MsgPtr =
   ## Pop top of stack or nil if stack is empty
   proc dbg(s:string) = echo stk.name & ".pop:" & s
   when DBG: dbg " + stk=" & $stk
@@ -91,7 +91,7 @@ proc pop*(stk: StackPtr): LinkNodePtr =
   # Playing it safe using MemModel ACQ_REL
   result = stk.tos.next
   var newTos = result.next
-  while not atomicCompareExchangeN[LinkNodePtr](addr stk.tos.next, addr result, newTos,
+  while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr result, newTos,
       false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
     result = stk.tos.next
     newTos = result.next
@@ -105,7 +105,7 @@ when isMainModule:
 
   type
     TestObjPtr = ptr TestObj
-    TestObj = object of LinkNode
+    TestObj = object of Msg
       id: int
 
   proc newTestObj(id: int): TestObjPtr =
@@ -113,7 +113,7 @@ when isMainModule:
     result.next = nil
     result.id = id
 
-  converter toTestObjPtr(node: LinkNodePtr): TestObjPtr =
+  converter toTestObjPtr(node: MsgPtr): TestObjPtr =
     result = cast[TestObjPtr](node)
 
   suite "test mpmcstack":

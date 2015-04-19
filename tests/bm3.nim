@@ -1,4 +1,4 @@
-import msg, linknode, mpscfifo, msgarena, msglooper, benchmark, os, locks
+import msg, mpscfifo, msgarena, msglooper, benchmark, os, locks
 
 # include bmSuite so we can use it inside t(name: string)
 include "bmsuite"
@@ -7,7 +7,7 @@ const
   #runTime = 60.0 * 60.0 * 2.0
   runTime = 30.0
   warmupTime = 0.25
-  threadCount = 1
+  threadCount = 192
   testStatsCount = 1
 
 var
@@ -17,7 +17,7 @@ var
 
 var ml1ConsumerCount = 0
 proc ml1Consumer(msg: MsgPtr) =
-  #echo "ml1Consumer: **** msg=", msg
+  # echo "ml1Consumer: **** msg=", msg
   ml1ConsumerCount += 1
   msg.rspq.add(msg)
 
@@ -48,21 +48,19 @@ proc t(tobj: TObj) {.thread.} =
 
     setup:
       rspq = newMpscFifo("rspq-" & suiteObj.suiteName, ma, blockIfEmpty)
-      msg = ma.getMsg(tobj.index, 0)
-      msg.rspq = rspq
 
     teardown:
-      ma.retMsg(msg)
-      #rspq.delMpscFifo()
+      rspq.delMpscFifo()
 
     # One loop for the moment
     test "ping-pong", runTime, tsa:
       cmd += 1
-      msg.cmd = cmd
+      msg = ma.getMsg(nil, rspq, cmd, 0)
       ml1RsvQ.add(msg)
       msg = rspq.rmv()
-      #echo rspq.name & ": $$$$ msg=" & $msg
-
+      doAssert(msg.cmd == cmd)
+      ma.retMsg(msg)
+      # echo rspq.name & ": $$$$ msg=" & $msg
 
   #echo "t:- tobj=", tobj
 

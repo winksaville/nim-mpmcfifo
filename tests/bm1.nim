@@ -1,7 +1,7 @@
 # The performance comments below where using my Ubuntu linux desktop
 # compiled with nim 0.10.3 sha1: 4b98768a and buildFlags:
 # "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
-import msg, linknode, mpscfifo, msgarena, benchmark
+import msg, mpscfifo, msgarena, benchmark
 
 const
   timeLoops = 5.0
@@ -11,49 +11,12 @@ suite "mpscfifo", 0.25:
     ma: MsgArenaPtr
     mq: MsgQueuePtr
     msg: MsgPtr
-    ln: LinkNodePtr
     tsa: array[0..0, TestStats]
 
   setup:
     ma = newMsgArena()
     mq = newMpscFifo("fifo", ma, blockIfEmpty)
-    msg = ma.getMsg(1, 0)
-    ln = ma.getLinkNode(nil, msg)
-  teardown:
-    msg = toMsg(ln.extra)
-    ma.retMsg(msg)
-    ma.retLinkNode(ln)
-    mq.delMpscFifo()
-    ma.delMsgArena()
-
-  # mpscfifo.test add/rmvNode blocking: ts={min=67cy mean=82cy minC=364 n=5375265}
-  test "test add/rmvNode blocking", timeLoops, tsa:
-    mq.addNode(ln)
-    ln = mq.rmvNode()
-
-
-  setup:
-    ma = newMsgArena()
-    mq = newMpscFifo("fifo", ma, nilIfEmpty)
-    msg = ma.getMsg(1, 0)
-    ln = ma.getLinkNode(nil, msg)
-  teardown:
-    msg = toMsg(ln.extra)
-    ma.retMsg(msg)
-    ma.retLinkNode(ln)
-    mq.delMpscFifo()
-    ma.delMsgArena()
-
-  # mpscfifo.test add/rmvNode non-blocking: ts={min=10cy mean=29cy minC=7763 n=5480653}
-  test "test add/rmvNode non-blocking", timeLoops, tsa:
-    mq.addNode(ln)
-    ln = mq.rmvNode()
-
-
-  setup:
-    ma = newMsgArena()
-    mq = newMpscFifo("fifo", ma, blockIfEmpty)
-    msg = ma.getMsg(2, 0)
+    msg = ma.getMsg(nil, nil, 2, 0)
   teardown:
     ma.retMsg(msg)
     mq.delMpscFifo()
@@ -67,14 +30,44 @@ suite "mpscfifo", 0.25:
 
   setup:
     ma = newMsgArena()
+    mq = newMpscFifo("fifo", ma, blockIfEmpty)
+  teardown:
+    mq.delMpscFifo()
+    ma.delMsgArena()
+
+  # mpscfifo.bm get/add/rmv/ret blocking: ts={min=253cy mean=293cy minC=524 n=4878547}
+  test "bm get/add/rmv/ret blocking", timeLoops, tsa:
+    msg = ma.getMsg(nil, nil, 2, 0)
+    mq.add(msg)
+    msg = mq.rmv()
+    ma.retMsg(msg)
+
+
+  setup:
+    ma = newMsgArena()
     mq = newMpscFifo("fifo", ma, nilIfEmpty)
-    msg = ma.getMsg(2, 0)
+    msg = ma.getMsg(nil, nil, 2, 0)
   teardown:
     ma.retMsg(msg)
     mq.delMpscFifo()
     ma.delMsgArena()
 
-  # mpscfifo.bm add/rmv non-blocking: ts={min=67cy mean=93cy minC=6 n=5362014}
+  # mpscfifo.bm add/rmv non-blocking: ts={min=10cy mean=40cy minC=9 Vn=5195976}
   test "bm add/rmv non-blocking", timeLoops, tsa:
     mq.add(msg)
     msg = mq.rmv()
+
+
+  setup:
+    ma = newMsgArena()
+    mq = newMpscFifo("fifo", ma, nilIfEmpty)
+  teardown:
+    mq.delMpscFifo()
+    ma.delMsgArena()
+
+  # mpscfifo.bm get/add/rmv/ret non-blocking: ts={min=82cy mean=104cy minC=11 n=5084526}
+  test "bm get/add/rmv/ret non-blocking", timeLoops, tsa:
+    msg = ma.getMsg(nil, nil, 2, 0)
+    mq.add(msg)
+    msg = mq.rmv()
+    ma.retMsg(msg)
