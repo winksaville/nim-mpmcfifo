@@ -9,7 +9,7 @@ const
 type
   MsgArenaPtr* = ptr MsgArena
   MsgArena* = object
-    lock: TLock
+    #lock: TLock
     msgStack: StackPtr
 
 proc ptrToStr(label: string, p: pointer): string =
@@ -22,7 +22,7 @@ proc `$`*(ma: MsgArenaPtr): string =
   if ma == nil:
     result = "<nil>"
   else:
-    ma.lock.acquire()
+    #ma.lock.acquire()
     block:
       var msgStr = "{"
       var firstTime = true
@@ -35,7 +35,7 @@ proc `$`*(ma: MsgArenaPtr): string =
             sep = ", "
       msgStr &= "}"
       result = "msgStack: " & " " & msgStr & "}"
-    ma.lock.release()
+    #ma.lock.release()
 
 converter toMsg*(p: pointer): MsgPtr {.inline.} =
   result = cast[MsgPtr](p)
@@ -62,14 +62,14 @@ proc delMsg*(msg: MsgPtr) =
 proc newMsgArena*(): MsgArenaPtr =
   when DBG: echo "newMsgArena:+"
   result = cast[MsgArenaPtr](allocShared0(sizeof(MsgArena)))
-  result.lock.initLock()
+  #result.lock.initLock()
   result.msgStack = newMpmcStack("msgStack")
   when DBG: echo "newMsgArena:-"
 
 proc delMsgArena*(ma: MsgArenaPtr) =
   when DBG: echo "delMsgArena:+"
-  ma.lock.acquire()
-  when DBG: echo "delMsgArena: lock accquired"
+  #ma.lock.acquire()
+  #when DBG: echo "delMsgArena: lock accquired"
   block:
     while true:
       var msg = ma.msgStack.pop()
@@ -78,8 +78,8 @@ proc delMsgArena*(ma: MsgArenaPtr) =
       delMsg(msg)
 
     ma.msgStack.delMpmcStack()
-  ma.lock.release()
-  ma.lock.deinitLock()
+  #ma.lock.release()
+  #ma.lock.deinitLock()
   deallocShared(ma)
   when DBG: echo "delMsgArena:-"
 

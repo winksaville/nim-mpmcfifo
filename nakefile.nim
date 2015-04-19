@@ -4,8 +4,8 @@ var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
     "tests/nimcache", "tests/testatomics",
     "tests/bm1", "tests/bm2", "tests/bm3"]
-  buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
-  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
+  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
+  buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
   #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on --parallelBuild:1"
 
   docFlags = ""
