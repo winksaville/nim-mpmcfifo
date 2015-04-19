@@ -61,7 +61,7 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
   proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
   when DBG: dbg "+"
 
-  mq.name = name
+  #mq.name = name
   mq.arena = arena
   mq.blocking = blocking
   mq.ownsCondAndLock = owner
@@ -118,7 +118,7 @@ proc delMpscFifo*(qp: QueuePtr) =
   mq.arena = nil
   mq.head = nil
   mq.tail = nil
-  GcUnref(mq.name)
+  #GcUnref(mq.name)
   deallocShared(mq)
 
   when DBG: dbg "-"
