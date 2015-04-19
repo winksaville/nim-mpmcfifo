@@ -3,7 +3,7 @@ import nake
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
     "tests/nimcache", "tests/testatomics",
-    "tests/bm1", "tests/bm2"]
+    "tests/bm1", "tests/bm2", "tests/bm3", "tests/bm4"]
   #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
   buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
   #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on --parallelBuild:1"
@@ -56,6 +56,9 @@ task "bm2", "compile and run bm2":
 
 task "bm3", "compile and run bm3":
   compileRun("tests/bm3")
+
+task "bm4", "compile and run bm4":
+  compileRun("tests/bm4")
 
 task "mpscfifo", "build, run mpscfifo":
   compileNim("./mpscfifo")

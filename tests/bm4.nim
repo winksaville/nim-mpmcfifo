@@ -1,4 +1,4 @@
-import msg, linknode, mpscfifo, msgarena, msglooper, benchmark, os, locks
+import msg, linknode, mpscfifo, msgarena, lnlooper, benchmark, os, locks
 
 # include bmSuite so we can use it inside t(name: string)
 include "bmsuite"
@@ -16,10 +16,11 @@ var
   ml1RsvQ: QueuePtr
 
 var ml1ConsumerCount = 0
-proc ml1Consumer(msg: MsgPtr) =
-  #echo "ml1Consumer: **** msg=", msg
+proc ml1Consumer(ln: LinkNodePtr) =
   ml1ConsumerCount += 1
-  msg.rspq.add(msg)
+  var msg = cast[MsgPtr](ln.extra)
+  #echo "ml1Consumer: **** msg.cmd=" & $msg.cmd & " ln=", ln
+  msg.rspq.addNode(ln)
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
@@ -42,26 +43,29 @@ proc t(tobj: TObj) {.thread.} =
     echo suiteObj.suiteName & ".suiteObj=" & $suiteObj
     var
       msg: MsgPtr
+      ln: LinkNodePtr
       rspq: MsgQueuePtr
       tsa: array[0..testStatsCount-1, TestStats]
-      cmd: int32 = 0
+      cmd: int32 = 2
 
     setup:
       rspq = newMpscFifo("rspq-" & suiteObj.suiteName, ma, blockIfEmpty)
       msg = ma.getMsg(tobj.index, 0)
       msg.rspq = rspq
+      ln = ma.getLinkNode(nil, msg)
 
     teardown:
       ma.retMsg(msg)
+      ma.retLinkNode(ln)
       #rspq.delMpscFifo()
 
     # One loop for the moment
     test "ping-pong", runTime, tsa:
       cmd += 1
       msg.cmd = cmd
-      ml1RsvQ.add(msg)
-      msg = rspq.rmv()
-      #echo rspq.name & ": $$$$ msg=" & $msg
+      ml1RsvQ.addNode(ln)
+      ln = rspq.rmvNode()
+      #echo rspq.name & ": $$$$ msg.cmd=" & $msg.cmd & " ln=" & $ln
 
 
   #echo "t:- tobj=", tobj
