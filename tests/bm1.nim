@@ -1,6 +1,4 @@
-# The performance comments below where using my Ubuntu linux desktop
-# compiled with nim 0.10.3 sha1: 4b98768a and buildFlags:
-# "-d:release --verbosity:1 --hints:off --warnings:off --threads:on --embedsrc --lineDir:on"
+# Simple benchmarks
 import msg, mpscfifo, msgarena, benchmark
 
 const
