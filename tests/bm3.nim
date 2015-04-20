@@ -7,7 +7,7 @@ const
   #runTime = 60.0 * 60.0 * 2.0
   runTime = 30.0
   warmupTime = 0.25
-  threadCount = 192
+  threadCount = 96
   testStatsCount = 1
 
 var
@@ -23,7 +23,7 @@ proc ml1Consumer(msg: MsgPtr) =
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
-ml1RsvQ = newMpscFifo("ml1RsvQ", ma, false, ml1.condBool, ml1.cond, ml1.lock, blockIfEmpty)
+ml1RsvQ = newMpscFifo("ml1RsvQ", ma, ml1)
 ml1.addProcessMsg(ml1Consumer, ml1RsvQ)
 
 type
@@ -76,7 +76,6 @@ sleep(round(((runTime * 1000.0) * 1.1) + 2000.0))
 
 echo "cleanup ml1ConsumerCount=", ml1ConsumerCount
 
-# TODO: We're not ending cleanly so these can cause assertions.
 ml1RsvQ.delMpscFifo()
 ml1.delMsgLooper()
 ma.delMsgArena()
