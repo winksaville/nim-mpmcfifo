@@ -76,8 +76,8 @@ proc push*(stk: StackPtr,  node: MsgPtr) =
     # Playing it safe using MemModel ACQ_REL
     var oldTos = stk.tos.next
     node.next = oldTos
-    while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr oldTos, node,
-        false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+    while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr oldTos,
+        node, false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
       oldTos = stk.tos.next
       node.next = oldTos
 
@@ -91,8 +91,8 @@ proc pop*(stk: StackPtr): MsgPtr =
   # Playing it safe using MemModel ACQ_REL
   result = stk.tos.next
   var newTos = result.next
-  while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr result, newTos,
-      false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+  while not atomicCompareExchangeN[MsgPtr](addr stk.tos.next, addr result,
+      newTos, false, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
     result = stk.tos.next
     newTos = result.next
   if result == addr stk.tos:
