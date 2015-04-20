@@ -42,14 +42,15 @@ proc `$`*(stk: StackPtr): string =
 
       result &= "}"
 
-proc isEmpty(stk): bool {.inline.} =
+proc isEmpty(stk: StackPtr): bool {.inline.} =
   result = stk.tos.next == addr stk.tos
 
 proc newMpmcStack*(name: string): StackPtr =
   ## Create a new Fifo
   var stk = cast[StackPtr](allocShared(sizeof(Stack)))
-  proc dbg(s:string) = echo name & ".newMpmcStack(name)" & s
-  when DBG: dbg "+"
+  when DBG:
+    proc dbg(s:string) = echo name & ".newMpmcStack(name)" & s
+    dbg "+"
 
   stk.name = name
   stk.tos.next = addr stk.tos
@@ -58,8 +59,9 @@ proc newMpmcStack*(name: string): StackPtr =
   when DBG: dbg "- stk=" & $stk
 
 proc delMpmcStack*(stk: StackPtr) =
-  proc dbg(s:string) = echo stk.name & ".delMpmcStack:" & s
-  when DBG: dbg "+ stk=" & $stk
+  when DBG:
+    proc dbg(s:string) = echo stk.name & ".delMpmcStack:" & s
+    dbg "+ stk=" & $stk
 
   doAssert(stk.isEmpty())
   GcUnref(stk.name)
@@ -69,8 +71,9 @@ proc delMpmcStack*(stk: StackPtr) =
 
 proc push*(stk: StackPtr,  node: MsgPtr) =
   ## Push node to top of stack
-  proc dbg(s:string) = echo stk.name & ".push:" & s
-  when DBG: dbg "+ stk=" & $stk & ptrToStr(" node=", node)
+  when DBG:
+    proc dbg(s:string) = echo stk.name & ".push:" & s
+    dbg "+ stk=" & $stk & ptrToStr(" node=", node)
 
   if node != nil:
     # Playing it safe using MemModel ACQ_REL
@@ -85,8 +88,9 @@ proc push*(stk: StackPtr,  node: MsgPtr) =
 
 proc pop*(stk: StackPtr): MsgPtr =
   ## Pop top of stack or nil if stack is empty
-  proc dbg(s:string) = echo stk.name & ".pop:" & s
-  when DBG: dbg " + stk=" & $stk
+  when DBG:
+    proc dbg(s:string) = echo stk.name & ".pop:" & s
+    dbg " + stk=" & $stk
 
   # Playing it safe using MemModel ACQ_REL
   result = stk.tos.next

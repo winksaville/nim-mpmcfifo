@@ -7,7 +7,7 @@ var
     "tests/t1"]
 
   typicalFlags = "--verbosity:1 --listCmd --embedsrc" &
-    " --threads:on --hints:off --warnings:off"
+    " --threads:on --hints:off --warnings:on"
   releaseFlags = typicalFlags &
     " --lineDir:off --lineTrace=off --stackTrace:off -d:release"
   debugFlags   = typicalFlags &
@@ -20,7 +20,7 @@ var
   docFiles: seq[string] = @[]
   exampleFiles: seq[string] = @[]
 
-proc compileNim(fullPath: string, flags: string = debugFlags) =
+proc compileNim(fullPath: string, flags: string) =
   echo "nim c: ", fullPath
   if not shell(nimExe, "c", flags, fullPath):
     echo "error compiling"
@@ -32,16 +32,16 @@ proc runNim(fullPath: string) =
     echo "error running: file=", fullPath
     quit 1
 
-proc compileRun(fullPath: string, flags: string = "") =
+proc compileRun(fullPath: string, flags: string = buildFlags) =
   compileNim(fullPath, flags)
   runNim(fullPath)
 
-proc cleanCompileRun(fullPath: string, flags: string = "") =
+proc cleanCompileRun(fullPath: string, flags: string = buildFlags) =
   runTask "clean"
   compileNim(fullPath, flags)
   runNim(fullPath)
 
-proc fullCompileRun(fullPath: string, flags: string = "") =
+proc fullCompileRun(fullPath: string, flags: string = buildFlags) =
   runTask "clean"
   runTask "docs"
   compileNim(fullPath, flags)
@@ -77,10 +77,6 @@ task "bm3-d", "compile and run bm3":
 task "t1", "compile and run t1":
   compileRun("tests/t1")
 
-task "mpscfifo", "build, run mpscfifo":
-  compileNim("./mpscfifo")
-  runNim("./mpscfifo")
-
 task "docs", "Buiild the documents":
   for file in docFiles:
     if not shell(nimExe, "doc", docFlags, file):
@@ -89,8 +85,7 @@ task "docs", "Buiild the documents":
 
 task "exmpl", "Build and run the exmpl":
   for file in exampleFiles:
-    compileNim(file)
-    runNim(file)
+    compileRun(file)
 
 task "clean", "clean build artifacts":
   proc removeFileOrDir(file: string) =

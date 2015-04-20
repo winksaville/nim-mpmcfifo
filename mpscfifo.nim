@@ -57,8 +57,9 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
   var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
-  proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
-  when DBG: dbg "+"
+  when DBG:
+    proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
+    dbg "+"
 
   #mq.name = name
   mq.arena = arena
@@ -106,8 +107,9 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, lpr: MsgLooperPtr):
 
 proc delMpscFifo*(qp: QueuePtr) =
   var mq = cast[MsgQueuePtr](qp)
-  proc dbg(s:string) = echo mq.name & ".delMpscFifo:" & s
-  when DBG: dbg "+ mq=" & $mq
+  when DBG:
+    proc dbg(s:string) = echo mq.name & ".delMpscFifo:" & s
+    dbg "+ mq=" & $mq
 
   doAssert(mq.isEmpty())
   mq.arena.retMsg(mq.head)
@@ -132,8 +134,9 @@ proc add*(q: QueuePtr, msg: MsgPtr) =
   ## Add the link node to the fifo
   if msg != nil:
     var mq = cast[MsgQueuePtr](q)
-    proc dbg(s:string) = echo mq.name & ".addNode:" & s
-    when DBG: dbg "+ ln=" & $ln & " mq=" & $mq
+    when DBG:
+      proc dbg(s:string) = echo mq.name & ".addNode:" & s
+      dbg "+ ln=" & $ln & " mq=" & $mq
 
     # Be sure msg.next is nil as it must be
     msg.next =  nil
@@ -159,8 +162,9 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
   ##
   ## May only be called from the consumer
   var mq = cast[MsgQueuePtr](q)
-  proc dbg(s:string) = echo mq.name & ".rmv:" & s
-  when DBG: dbg "+ mq=" & $mq
+  when DBG:
+    proc dbg(s:string) = echo mq.name & ".rmv:" & s
+    dbg "+ mq=" & $mq
 
   while true:
     var head = mq.head

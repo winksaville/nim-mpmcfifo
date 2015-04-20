@@ -20,10 +20,9 @@ proc looper(ml: MsgLooperPtr) =
   let
     prefix = ml.name & ".looper:"
 
-  proc dbg(s: string) {.inline.} =
-    when DBG: echo prefix & s
-
-  when DBG: dbg "+"
+  when DBG:
+    proc dbg(s: string) {.inline.} = echo prefix & s
+    dbg "+"
 
   gInitLock.acquire()
   block:
@@ -80,12 +79,12 @@ proc looper(ml: MsgLooperPtr) =
 
 
 proc newMsgLooper*(name: string): MsgLooperPtr =
-  proc dbg(s: string) =
-    echo name & ".newMsgLooper:" & s
   ## Create a newMsgLooper. This does not return until the looper
   ## has started and everything is initialized.
+  when DBG:
+    proc dbg(s: string) = echo name & ".newMsgLooper:" & s
+    dbg "+"
 
-  when DBG: dbg "+"
 
   # Use a global to coordinate initialization of the looper
   # We may want to make a MsgLooper an untracked structure
@@ -114,18 +113,18 @@ proc delMsgLooper*(ml: MsgLooperPtr) =
   ## This causes the msg looper to terminate and message processors
   ## associated with the looper will not receive any additonal
   ## messages. All queued up message are lost, use with care.
-  proc dbg(s:string) =
-    echo ml.name & ".delMsgLooper:" & s
-
-  when DBG: dbg "DOES NOTHING YET"
+  when DBG:
+    proc dbg(s:string) =
+      echo ml.name & ".delMsgLooper:" & s
+    dbg "DOES NOTHING YET"
 
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
   ## Add the ProcessMsg funtion and its associated Queue to this looper.
   ## Messages received on q will be dispacted to pm.
   var mq = cast[MsgQueuePtr](q)
-  proc dbg(s:string) =
-    echo ml.name & ".addMsgProcessor:" & s
-  when DBG: dbg "+"
+  when DBG:
+    proc dbg(s:string) = echo ml.name & ".addMsgProcessor:" & s
+    dbg "+"
   ml.lock[].acquire()
   when DBG: dbg "acquired"
   if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
