@@ -14,7 +14,7 @@
 ## ....
 ##
 
-import msg, msgarena, locks, strutils
+import msg, msgarena, msgloopertypes, locks, strutils
 
 const
   DBG = false
@@ -46,7 +46,6 @@ proc `$`*(mq: MsgQueuePtr): string =
       "}"
 
 proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
-  ## TODO: Use mq.condBool???
   ## Check if empty is only useful if its known that
   ## no other threads are using the queue. Therefore
   ## this is private and only used in delMpscFifo and
@@ -98,6 +97,12 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
 proc newMpscFifo*(name: string, arena: MsgArenaPtr): MsgQueuePtr =
   ## Create a new Fifo will block on rmv's if empty
   newMpscFifo(name, arena, blockIfEmpty)
+
+proc newMpscFifo*(name: string, arena: MsgArenaPtr, lpr: MsgLooperPtr):
+      MsgQueuePtr =
+  ## Create a new fifo for which lpr receives and dispatchs the msg
+  result = newMpscFifo(name, arena, false, lpr.condBool, lpr.cond, lpr.lock,
+    blockIfEmpty)
 
 proc delMpscFifo*(qp: QueuePtr) =
   var mq = cast[MsgQueuePtr](qp)
@@ -154,7 +159,7 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
   ##
   ## May only be called from the consumer
   var mq = cast[MsgQueuePtr](q)
-  proc dbg(s:string) = echo mq.name & ".rmvNode:" & s
+  proc dbg(s:string) = echo mq.name & ".rmv:" & s
   when DBG: dbg "+ mq=" & $mq
 
   while true:

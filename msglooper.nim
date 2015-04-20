@@ -1,30 +1,11 @@
 import os, locks
 import msg, mpscfifo, msgarena
 
+import msgloopertypes
+export msgloopertypes
+
 const
   DBG = false
-  listMsgProcessorMaxLen = 10
-
-type
-  ProcessMsg* = proc(msg: MsgPtr)
-
-  MsgProcessorPtr* = ptr MsgProcessor
-  MsgProcessor* = object
-    mq: QueuePtr
-    pm: ProcessMsg
-
-  MsgLooperPtr* = ptr MsgLooper
-
-  MsgLooper* = object
-    name: string
-    initialized: bool
-    done: bool
-    condBool* : ptr bool
-    cond*: ptr TCond
-    lock*: ptr TLock
-    listMsgProcessorLen: int
-    listMsgProcessor: ptr array[0..listMsgProcessorMaxLen-1, MsgProcessorPtr]
-    thread: ptr TThread[MsgLooperPtr]
 
 # Global initialization lock and cond use to have newMsgLooper not return
 # until looper has startend and MsgLooper is completely initialized.
@@ -50,7 +31,8 @@ proc looper(ml: MsgLooperPtr) =
     # initialize MsgLooper
     ml.listMsgProcessorLen = 0
     ml.listMsgProcessor = cast[ptr array[0..listMsgProcessorMaxLen-1,
-              MsgProcessorPtr]](allocShared(sizeof(MsgProcessorPtr) * listMsgProcessorMaxLen))
+              MsgProcessorPtr]](allocShared(sizeof(MsgProcessorPtr) *
+                                                  listMsgProcessorMaxLen))
     ml.condBool = cast[ptr bool](allocShared(sizeof(bool)))
     ml.condBool[] = false
     ml.cond = cast[ptr TCond](allocShared(sizeof(TCond)))
@@ -62,7 +44,8 @@ proc looper(ml: MsgLooperPtr) =
     gInitCond.signal()
   gInitLock.release()
 
-  # BUG: What happens when the list changes while we're iterating in these loops!
+  # BUG: What happens when the list changes while we're iterating
+  # in these loops!
 
   while not ml.done:
     when DBG: dbg "TOL ml.listMsgProcessorLen=" & $ml.listMsgProcessorLen
@@ -99,8 +82,8 @@ proc looper(ml: MsgLooperPtr) =
 proc newMsgLooper*(name: string): MsgLooperPtr =
   proc dbg(s: string) =
     echo name & ".newMsgLooper:" & s
-  ## newMsgLooper does not return until the looper has started and
-  ## everything is fully initialized
+  ## Create a newMsgLooper. This does not return until the looper
+  ## has started and everything is initialized.
 
   when DBG: dbg "+"
 
@@ -114,7 +97,8 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
     result.initialized = false;
 
     when DBG: dbg "Using createThread"
-    result.thread = cast[ptr TThread[MsgLooperPtr]](allocShared(sizeof(TThread[MsgLooperPtr])))
+    result.thread = cast[ptr TThread[MsgLooperPtr]]
+                    (allocShared(sizeof(TThread[MsgLooperPtr])))
     createThread(result.thread[], looper, result)
 
     while (not result.initialized):
@@ -126,24 +110,25 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
   when DBG: dbg "-"
 
 proc delMsgLooper*(ml: MsgLooperPtr) =
-  ## kills the message looper, andd message processors
-  ## associated witht he looper will not receive any further
-  ## messages and all queued up message are lost.
-  ## So use this with care!!
+  ## Delete the message looper.
+  ## This causes the msg looper to terminate and message processors
+  ## associated with the looper will not receive any additonal
+  ## messages. All queued up message are lost, use with care.
   proc dbg(s:string) =
     echo ml.name & ".delMsgLooper:" & s
 
   when DBG: dbg "DOES NOTHING YET"
 
-proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, qp: QueuePtr) =
-  var mq = cast[MsgQueuePtr](qp)
+proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
+  ## Add the ProcessMsg funtion and its associated Queue to this looper.
+  ## Messages received on q will be dispacted to pm.
+  var mq = cast[MsgQueuePtr](q)
   proc dbg(s:string) =
     echo ml.name & ".addMsgProcessor:" & s
   when DBG: dbg "+"
   ml.lock[].acquire()
   when DBG: dbg "acquired"
   if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-    when DBG: dbg "...."
     var mp = cast[MsgProcessorPtr](allocShared(sizeof(MsgProcessor)))
     mp.mq = mq
     mp.pm = pm
