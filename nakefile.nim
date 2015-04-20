@@ -5,17 +5,24 @@ var
     "tests/nimcache", "tests/testatomics",
     "tests/bm1", "tests/bm2", "tests/bm3",
     "tests/t1"]
-  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:off --lineTrace=off --stackTrace:off -d:release"
-  buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on"
-  #buildFlags = "--verbosity:1 --listCmd --embedsrc --threads:on --hints:off --warnings:off --lineDir:on  --lineTrace=on  --stackTrace:on --parallelBuild:1"
+
+  typicalFlags = "--verbosity:1 --listCmd --embedsrc" &
+    " --threads:on --hints:off --warnings:off"
+  releaseFlags = typicalFlags &
+    " --lineDir:off --lineTrace=off --stackTrace:off -d:release"
+  debugFlags   = typicalFlags &
+    " --lineDir:on  --lineTrace=on  --stackTrace:on"
+  parallel1Flags = debugFlags & " --parallelBuild:1"
+
+  buildFlags = debugFlags
 
   docFlags = ""
   docFiles: seq[string] = @[]
   exampleFiles: seq[string] = @[]
 
-proc compileNim(fullPath: string) =
+proc compileNim(fullPath: string, flags: string = debugFlags) =
   echo "nim c: ", fullPath
-  if not shell(nimExe, "c",  buildFlags, fullPath):
+  if not shell(nimExe, "c", flags, fullPath):
     echo "error compiling"
     quit 1
 
@@ -25,19 +32,19 @@ proc runNim(fullPath: string) =
     echo "error running: file=", fullPath
     quit 1
 
-proc compileRun(fullPath: string) =
-  compileNim(fullPath)
+proc compileRun(fullPath: string, flags: string = "") =
+  compileNim(fullPath, flags)
   runNim(fullPath)
 
-proc cleanCompileRun(fullPath: string) =
+proc cleanCompileRun(fullPath: string, flags: string = "") =
   runTask "clean"
-  compileNim(fullPath)
+  compileNim(fullPath, flags)
   runNim(fullPath)
 
-proc fullCompileRun(fullPath: string) =
+proc fullCompileRun(fullPath: string, flags: string = "") =
   runTask "clean"
   runTask "docs"
-  compileNim(fullPath)
+  compileNim(fullPath, flags)
   runNim(fullPath)
 
 task "mpscfifo", "compile and run mpscfifo":
@@ -50,13 +57,22 @@ task "testatomics", "compile and run testatomics":
   compileRun("tests/testatomics")
 
 task "bm1", "compile and run bm1":
-  compileRun("tests/bm1")
+  compileRun("tests/bm1", releaseFlags)
+
+task "bm1-d", "compile and run bm1":
+  compileRun("tests/bm1", debugFlags)
 
 task "bm2", "compile and run bm2":
-  compileRun("tests/bm2")
+  compileRun("tests/bm2", releaseFlags)
+
+task "bm2-d", "compile and run bm2":
+  compileRun("tests/bm2", debugFlags)
 
 task "bm3", "compile and run bm3":
-  compileRun("tests/bm3")
+  compileRun("tests/bm3", releaseFlags)
+
+task "bm3-d", "compile and run bm3":
+  compileRun("tests/bm3", debugFlags)
 
 task "t1", "compile and run t1":
   compileRun("tests/t1")
