@@ -1,6 +1,7 @@
 import locks, strutils
 
 type
+  Component = object of RootObj
 
   QueuePtr* = ptr Queue
   Queue* = object of RootObj

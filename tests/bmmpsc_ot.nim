@@ -15,7 +15,7 @@ const
 var
   ma: MsgArenaPtr
   ml1: MsgLooperPtr
-  ml1RsvQ: QueuePtr
+  consumerRcvq: QueuePtr
 
 var ml1ConsumerCount = 0
 proc ml1Consumer(msg: MsgPtr) =
@@ -25,17 +25,36 @@ proc ml1Consumer(msg: MsgPtr) =
 
 ma = newMsgArena()
 ml1 = newMsgLooper("ml1")
-ml1RsvQ = newMpscFifo("ml1RsvQ", ma, ml1)
-ml1.addProcessMsg(ml1Consumer, ml1RsvQ)
+consumerRcvq = newMpscFifo("consumerRcvq", ma, ml1)
+ml1.addProcessMsg(ml1Consumer, consumerRcvq)
 
 type
-  TObj = object
+  Producer = object of Component
     name: string
-    index: int32
+    # Name of the producer
 
-proc newTObj(name: string, index: int): TObj =
+    index: int32
+    # Index number of the producer
+
+    rcvq: QueuePtr
+    # Receive Queue for this producer
+
+    consumerq: QueuePtr
+    # Receive Queue for the consumer
+
+proc newProducer(name: string, index: int,
+    rcvq: QueuePtr, consumerq: QueuePtr): Producer =
   result.name = name
   result.index = cast[int32](index and 0xFFFFFFFF)
+  result.rcvq = rcvq
+  result.consumerq = consumerq
+
+proc producerPm(component: Component, msg: MsgPtr) =
+  switch msg.cmd:
+    case 0:
+    case 1:
+    else:
+      echo 
 
 proc t(msg: MsgPtr) =
   #echo "t+ tobj=", tobj
@@ -58,7 +77,7 @@ proc t(msg: MsgPtr) =
 #    test "ping-pong", runTime, tsa:
 #      cmd += 1
 #      msg = ma.getMsg(nil, rspq, cmd, 0)
-#      ml1RsvQ.add(msg)
+#      consumerRcvq.add(msg)
 #      msg = rspq.rmv()
 #      doAssert(msg.cmd == cmd)
 #      ma.retMsg(msg)
@@ -68,16 +87,22 @@ proc t(msg: MsgPtr) =
 
 var
   idx = 0
-  producers: array[0..producerCount-1, TObj]
+  producers: array[0..producerCount-1, Producer]
 
 for idx in 0..producers.len-1:
-  var tobj = newTObj("Producer" & $idx, idx)
-  ml1.add(....)
+  var producerName = "producer" & $idx
+  var producerRcvq = newMpscFifo(producerName, ma, blockIfEmpty) ## ???
+  var producer = newProducer(producerName, idx, producerRcvq, consumerRcvq)
+  producers[idx] = producer
+  ml1.addProcessMsg(producerPm, producerRcvq)
 
 sleep(round(((runTime * 1000.0) * 1.1) + 2000.0))
 
 echo "cleanup ml1ConsumerCount=", ml1ConsumerCount
 
-ml1RsvQ.delMpscFifo()
+## TODO: send a message to each producer to tell them to stop?
+## Clean up producers and consumer
+
+consumerRcvq.delMpscFifo()
 ml1.delMsgLooper()
 ma.delMsgArena()
