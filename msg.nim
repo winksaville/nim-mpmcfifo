@@ -1,10 +1,21 @@
 import locks, strutils
 
 type
-  Component = object of RootObj
-
   QueuePtr* = ptr Queue
   Queue* = object of RootObj
+
+  ComponentPtr* = ptr Component
+  Component* = object of RootObj
+    name*: string
+    # Name of the producer
+
+    pm*: ProcessMsg
+    # ProcessMsg proc
+
+    rcvq*: QueuePtr
+    # receive queue pointer
+
+  ProcessMsg* = proc(cp: ComponentPtr, msg: MsgPtr)
 
   MsgPtr* = ptr Msg
   Msg* = object of RootObj

@@ -5,7 +5,7 @@ import msgloopertypes
 export msgloopertypes
 
 const
-  DBG = false
+  DBG = true
 
 # Global initialization lock and cond use to have newMsgLooper not return
 # until looper has startend and MsgLooper is completely initialized.
@@ -56,7 +56,7 @@ proc looper(ml: MsgLooperPtr) =
       if msg != nil:
         processedAtLeastOneMsg = true
         when DBG: dbg "processing msg=" & $msg
-        mp.pm(msg)
+        mp.pm(mp.cp, msg)
         # Cannot assume msg is valid here
 
     if not processedAtLeastOneMsg:
@@ -118,7 +118,8 @@ proc delMsgLooper*(ml: MsgLooperPtr) =
       echo ml.name & ".delMsgLooper:" & s
     dbg "DOES NOTHING YET"
 
-proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
+proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
+    cp: ComponentPtr) =
   ## Add the ProcessMsg funtion and its associated Queue to this looper.
   ## Messages received on q will be dispacted to pm.
   var mq = cast[MsgQueuePtr](q)
@@ -129,6 +130,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
   when DBG: dbg "acquired"
   if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
     var mp = cast[MsgProcessorPtr](allocShared(sizeof(MsgProcessor)))
+    mp.cp = cp
     mp.mq = mq
     mp.pm = pm
     ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
@@ -139,3 +141,10 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
 
   ml.lock[].release()
   when DBG: dbg "-"
+
+proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
+  addProcessMsg(ml, pm, q, nil)
+
+proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
+  addProcessMsg(ml, cp.pm, cp.rcvq, cp)
+

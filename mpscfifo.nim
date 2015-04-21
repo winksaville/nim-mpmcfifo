@@ -17,7 +17,7 @@
 import msg, msgarena, msgloopertypes, locks, strutils
 
 const
-  DBG = false
+  DBG = true
 
 type
   Blocking* = enum
@@ -27,7 +27,7 @@ type
     name*: string
     blocking*: Blocking
     ownsCondAndLock*: bool
-    condBool*: ptr bool ## True if empty to !empty transition, false !empty to empty
+    condBool*: ptr bool
     cond*: ptr TCond
     lock*: ptr TLock
     arena: MsgArenaPtr
@@ -61,7 +61,7 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
     dbg "+"
 
-  #mq.name = name
+  mq.name = name
   mq.arena = arena
   mq.blocking = blocking
   mq.ownsCondAndLock = owner
@@ -136,7 +136,7 @@ proc add*(q: QueuePtr, msg: MsgPtr) =
     var mq = cast[MsgQueuePtr](q)
     when DBG:
       proc dbg(s:string) = echo mq.name & ".addNode:" & s
-      dbg "+ ln=" & $ln & " mq=" & $mq
+      dbg "+ msg=" & $msg & " mq=" & $mq
 
     # Be sure msg.next is nil as it must be
     msg.next =  nil
@@ -191,6 +191,10 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
         mq.lock[].acquire()
         if next.next == nil:
           when DBG: dbg " EMPTY"
+          ## TODO: Should we really do this if we're not the owner?
+          ## if we're not the owner for instance we're sharing a looper
+          ## with other components then it should be set to false when
+          ## everyone is EMPTY????
           atomicStoreN(mq.condBool, false, ATOMIC_RELEASE)
         mq.lock[].release()
 

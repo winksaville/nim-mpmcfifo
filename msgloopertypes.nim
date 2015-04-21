@@ -8,12 +8,11 @@ const
   listMsgProcessorMaxLen* = 10
 
 type
-  ProcessMsg* = proc(msg: MsgPtr)
-
   MsgProcessorPtr* = ptr MsgProcessor
   MsgProcessor* = object
-    mq*: QueuePtr
     pm*: ProcessMsg
+    mq*: QueuePtr
+    cp*: ComponentPtr
 
   MsgLooperPtr* = ptr MsgLooper
 
