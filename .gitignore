@@ -10,6 +10,6 @@ nimcache/
 /tests/testatomics
 /tests/bm1
 /tests/bm2
-/tests/bm3
-/tests/bm4
+/tests/bmmpsc_otp
+/tests/bmmpsc_ot
 /tests/t1

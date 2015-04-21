@@ -3,7 +3,7 @@ import nake
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
     "tests/nimcache", "tests/testatomics",
-    "tests/bm1", "tests/bm2", "tests/bm3",
+    "tests/bm1", "tests/bm2", "tests/bmmpsc_otp", "tests/bmmpsc_ot",
     "tests/t1"]
 
   typicalFlags = "--verbosity:1 --listCmd --embedsrc" &
@@ -68,11 +68,17 @@ task "bm2", "compile and run bm2":
 task "bm2-d", "compile and run bm2":
   compileRun("tests/bm2", debugFlags)
 
-task "bm3", "compile and run bm3":
-  compileRun("tests/bm3", releaseFlags)
+task "bmmpsc_otp", "compile and run bmmpsc_otp":
+  compileRun("tests/bmmpsc_otp", releaseFlags)
 
-task "bm3-d", "compile and run bm3":
-  compileRun("tests/bm3", debugFlags)
+task "bmmpsc_otp-d", "compile and run bmmpsc_otp":
+  compileRun("tests/bmmpsc_otp", debugFlags)
+
+task "bmmpsc_ot", "compile and run bmmpsc_ot":
+  compileRun("tests/bmmpsc_ot", releaseFlags)
+
+task "bmmpsc_ot-d", "compile and run bmmpsc_ot":
+  compileRun("tests/bmmpsc_ot", debugFlags)
 
 task "t1", "compile and run t1":
   compileRun("tests/t1")
