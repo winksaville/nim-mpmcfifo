@@ -16,7 +16,7 @@ var
   ml1RsvQ: QueuePtr
 
 var ml1ConsumerCount = 0
-proc ml1Consumer(msg: MsgPtr) =
+proc ml1Consumer(cp: ComponentPtr, msg: MsgPtr) =
   # echo "ml1Consumer: **** msg=", msg
   ml1ConsumerCount += 1
   msg.rspq.add(msg)
