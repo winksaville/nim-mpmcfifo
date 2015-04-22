@@ -93,6 +93,23 @@ proc getMsg*(ma: MsgArenaPtr, next: MsgPtr, rspq: QueuePtr, cmd: int32,
   else:
     result.initMsg(next, rspq, cmd, nil)
 
+proc getMsg*(ma: MsgArenaPtr, rspq: QueuePtr, cmd: int32,
+    dataSize: int): MsgPtr {.inline.} =
+  ## Get a message from the arena or if none allocate one
+  ## TODO: Allow datasize other than zero
+  result = getMsg(ma, nil, rspq, cmd, dataSize)
+
+proc getMsg*(ma: MsgArenaPtr, rspq: QueuePtr,
+    cmd: int32): MsgPtr {.inline.} =
+  ## Get a message from the arena or if none allocate one
+  ## TODO: Allow datasize other than zero
+  result = getMsg(ma, nil, rspq, cmd, 0)
+
+proc getMsg*(ma: MsgArenaPtr, cmd: int32): MsgPtr {.inline.} =
+  ## Get a message from the arena or if none allocate one
+  ## TODO: Allow datasize other than zero
+  result = getMsg(ma, nil, nil, cmd, 0)
+
 proc retMsg*(ma: MsgArenaPtr, msg: MsgPtr) =
   ## Return a message to the arena
   ma.msgStack.push(msg)
