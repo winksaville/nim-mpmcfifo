@@ -61,6 +61,25 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
     dbg "+"
 
+  # BUG: when executing tests/bm1.nim the assignment to
+  # mq.name causes a SIGSEV:
+  #   $ nake bm1-d
+  #   nim c: tests/bm1
+  #   lib/core/locks.nim(22, 43) Warning: LockEffect is deprecated [Deprecated]
+  #   lib/core/locks.nim(25, 44) Warning: LockEffect is deprecated [Deprecated]
+  #   gcc -c  -w -pthread  -I/opt/nim/lib -o .....
+  #   [Linking]
+  #   run: tests/bm1
+  #   mpscfifo.bm add/rmv blocking: ts={min=389cy mean=431cy minC=30 n=3316451}
+  #   mpscfifo.bm get/add/rmv/ret blocking: ts={min=596cy mean=647cy minC=26 n=3196766}
+  #   Traceback (most recent call last)
+  #   bm1.nim(46)              bm1
+  #   mpscfifo.nim(109)        newMpscFifo
+  #   mpscfifo.nim(83)         newMpscFifo
+  #   gc.nim(269)              unsureAsgnRef
+  #   gc.nim(167)              decRef
+  #   SIGSEGV: Illegal storage access. (Attempt to read from nil?)
+  #   error running: file=tests/bm1
   mq.name = name
   mq.arena = arena
   mq.blocking = blocking
@@ -125,7 +144,7 @@ proc delMpscFifo*(qp: QueuePtr) =
   mq.arena = nil
   mq.head = nil
   mq.tail = nil
-  GcUnref(mq.name)
+  #GcUnref(mq.name)
   deallocShared(mq)
 
   when DBG: dbg "-"
