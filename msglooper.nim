@@ -17,11 +17,8 @@ gInitLock.initLock()
 gInitCond.initCond()
 
 proc looper(ml: MsgLooperPtr) =
-  let
-    prefix = ml.name & ".looper:"
-
   when DBG:
-    proc dbg(s: string) {.inline.} = echo prefix & s
+    proc dbg(s: string) = echo ml.name & ".looper" & s
     dbg "+"
 
   gInitLock.acquire()
@@ -49,6 +46,12 @@ proc looper(ml: MsgLooperPtr) =
   while not ml.done:
     when DBG: dbg "TOL ml.listMsgProcessorLen=" & $ml.listMsgProcessorLen
     # Check if there are any messages to process
+    #
+    # BUG: This loop can be inefficient. For example when
+    # running bmmpsc_ot.nim there is one consumer and N
+    # producers. In this scenario there will only be typically
+    # two messages processed when iterating over the
+    # listMsgProcessor array.
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
@@ -114,8 +117,7 @@ proc delMsgLooper*(ml: MsgLooperPtr) =
   ## associated with the looper will not receive any additonal
   ## messages. All queued up message are lost, use with care.
   when DBG:
-    proc dbg(s:string) =
-      echo ml.name & ".delMsgLooper:" & s
+    proc dbg(s:string) = echo ml.name & ".delMsgLooper:" & s
     dbg "DOES NOTHING YET"
 
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
@@ -137,7 +139,9 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
     ml.listMsgProcessorLen += 1
     ml.cond[].signal()
   else:
-    doAssert(ml.listMsgProcessorLen >= listMsgProcessorMaxLen)
+    doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
+      "Attempted to add too many ProcessMsg, maximum is " &
+      $listMsgProcessorMaxLen)
 
   ml.lock[].release()
   when DBG: dbg "-"

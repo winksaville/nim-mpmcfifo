@@ -24,6 +24,7 @@ type
     cond*: ptr TCond
     lock*: ptr TLock
     listMsgProcessorLen*: int
-    listMsgProcessor*: ptr array[0..listMsgProcessorMaxLen-1, MsgProcessorPtr]
+    listMsgProcessor*: ptr array[0..listMsgProcessorMaxLen-1,
+        MsgProcessorPtr]
     thread*: ptr TThread[MsgLooperPtr]
 
