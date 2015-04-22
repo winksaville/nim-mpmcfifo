@@ -6,9 +6,9 @@ import msg, mpscfifo, msgarena, msglooper, math, os, locks
 include "bmsuite"
 
 const
-  DBG = true
+  DBG = false
   #runTime = 60.0 * 60.0 * 2.0
-  runTime = 0.25
+  runTime = 30.0
   warmupTime = 0.25
   producerCount = 1
   testStatsCount = 1
@@ -22,7 +22,7 @@ var
 
 var ml1ConsumerCount = 0
 proc ml1Consumer(cp: ComponentPtr, msg: MsgPtr) =
-  echo "ml1Consumer: **** msg=", msg
+  when DBG: echo "ml1Consumer: **** msg=", msg
   ml1ConsumerCount += 1
   msg.rspq.add(msg)
 
@@ -46,6 +46,9 @@ type
     consumerq: QueuePtr
     # Receive Queue for the consumer
 
+proc `$`*(producer: ProducerPtr): string =
+  result= producer.name & " state=" & $producer.state
+
 proc newProducer(name: string, pm: ProcessMsg, rcvq: QueuePtr,
     consumerq: QueuePtr, index: int): ProducerPtr =
   result = cast[ProducerPtr](allocShared(sizeof(Producer)))
@@ -55,16 +58,15 @@ proc newProducer(name: string, pm: ProcessMsg, rcvq: QueuePtr,
   result.state = idle
   result.consumerq = consumerq
   result.index = cast[int32](index and 0xFFFFFFFF)
-  echo "newProducer: name=" & result.name & " index=" & $result.index
+  echo "newProducer: " & $result
 
 proc producerPm(cp: ComponentPtr, msg: MsgPtr) =
-  when DBG: echo cp.name & ": msg=" & $msg
-  var producer = cast[Producer](cp)
-  echo "after cast"
+  var producer = cast[ProducerPtr](cp)
+  when DBG: echo producer.name & ": msg=" & $msg
 
   # If command is top just respond and do nothing else
   if msg.cmd == STOP_CMD:
-    echo producer.name & ": stopped msg=" & $msg
+    echo producer.name & ": STOP_CMD msg=" & $msg
     producer.state = stopped
     msg.rspq.add(msg)
   else:
@@ -73,20 +75,23 @@ proc producerPm(cp: ComponentPtr, msg: MsgPtr) =
       case msg.cmd:
       of START_CMD:
         # On START_CMD forward the msg to consumer with the index
-        echo producer.name & ": idle: transition to running msg=" & $msg
+        echo producer.name &
+          ": idle: START_CMD transition to running msg=" & $msg
         msg.cmd = producer.index
+        msg.rspq = producer.rcvq
         producer.consumerq.add(msg)
         producer.state = running
       else:
-        echo producer.name & ": idle: ignore non START_CMD msg=" & $msg
+        echo producer.name &
+            ": idle: ignore non START_CMD msg=" & $msg
     of running:
       when DBG: echo producer.name & ": running: $$$$ msg=" & $msg
-      msg.rspq.add(msg)
+      producer.consumerq.add(msg)
     of stopped:
       echo producer.name & ": stopped: ignore msg=" & $msg
     else:
-      echo producer.name & ": Unknown state=" & $producer.state &
-          " msg=" & $msg
+      echo producer.name &
+          ": Unknown state=" & $producer.state & " msg=" & $msg
 
 var
   idx = 0
@@ -100,22 +105,22 @@ for idx in 0..producers.len-1:
                     consumerRcvq, idx)
   producers[idx] = producer
   ml1.addProcessMsg(producer)
+  echo "producer=", producer
+  var msg = ma.getMsg(nil, nil, START_CMD, 0)
+  producer.rcvq.add(msg)
 
-sleep(round(((runTime * 1000.0) * 1.1) + 2000.0))
+sleep(round(runTime * 1000.0))
 
 echo "cleanup ml1ConsumerCount=", ml1ConsumerCount
 
 ## Tell all producers to stop
 for idx in 0..producers.len-1:
+  var producer = producers[idx]
   var msg = ma.getMsg(nil, controlq, STOP_CMD, 0)
-  echo "Issue STOP_CMD to   " & producers[idx].name
-  producers[idx].rcvq.add(msg)
+  echo "Issue STOP_CMD to   " & $producer
+  producer.rcvq.add(msg)
   msg = controlq.rmv()
-  echo "Resp  STOP_CMD from " & producers[idx].name
-  echo producers[idx].name & ": STOPPED"
-
-## TODO: send a message to each producer to tell them to stop?
-## Clean up producers and consumer
+  echo "Resp  STOP_CMD from " & $producer
 
 consumerRcvq.delMpscFifo()
 ml1.delMsgLooper()

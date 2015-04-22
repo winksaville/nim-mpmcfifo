@@ -5,7 +5,7 @@ import msgloopertypes
 export msgloopertypes
 
 const
-  DBG = true
+  DBG = false
 
 # Global initialization lock and cond use to have newMsgLooper not return
 # until looper has startend and MsgLooper is completely initialized.

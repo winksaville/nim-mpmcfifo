@@ -17,7 +17,7 @@
 import msg, msgarena, msgloopertypes, locks, strutils
 
 const
-  DBG = true
+  DBG = false
 
 type
   Blocking* = enum
@@ -125,7 +125,7 @@ proc delMpscFifo*(qp: QueuePtr) =
   mq.arena = nil
   mq.head = nil
   mq.tail = nil
-  #GcUnref(mq.name)
+  GcUnref(mq.name)
   deallocShared(mq)
 
   when DBG: dbg "-"
