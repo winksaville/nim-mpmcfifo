@@ -41,8 +41,7 @@ proc isEmpty(stk: StackPtr): bool {.inline.} =
 
 proc newMpmcStack*(name: string): StackPtr =
   ## Create a new Fifo
-  var stk = cast[StackPtr](allocShared(sizeof(Stack)))
-  initializer[Stack](stk)
+  var stk = allocObject[Stack]()
   when DBG:
     proc dbg(s:string) = echo name & ".newMpmcStack(name)" & s
     dbg "+"
@@ -108,7 +107,7 @@ when isMainModule:
       id: int
 
   proc newTestObj(id: int): TestObjPtr =
-    result = cast[TestObjPtr](allocShared(sizeof(TestObj)))
+    result = allocObject[TestObj]()
     result.next = nil
     result.id = id
 

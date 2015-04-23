@@ -56,8 +56,7 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     owner: bool, condBool: ptr bool, cond: ptr TCond, lock: ptr TLock,
     blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
-  var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
-  initializer[MsgQueue](mq)
+  var mq = allocObject[MsgQueue]()
   when DBG:
     proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
     dbg "+"
@@ -90,12 +89,10 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
     condBool = cast[ptr bool](allocShared(sizeof(bool)))
     condBool[] = false
 
-    cond = cast[ptr TCond](allocShared(sizeof(TCond)))
-    initializer[TCond](cond)
+    cond = allocObject[TCond]()
     cond[].initCond()
 
-    lock = cast[ptr TLock](allocShared0(sizeof(TLock)))
-    initializer[TLock](lock)
+    lock = allocObject[TLock]()
     lock[].initLock()
 
   result = newMpscFifo(name, arena, owned, condBool, cond, lock, blocking)

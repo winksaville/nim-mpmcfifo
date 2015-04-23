@@ -31,11 +31,9 @@ proc looper(ml: MsgLooperPtr) =
                                                   listMsgProcessorMaxLen))
     ml.condBool = cast[ptr bool](allocShared(sizeof(bool)))
     ml.condBool[] = false
-    ml.cond = cast[ptr TCond](allocShared(sizeof(TCond)))
-    initializer[TCond](ml.cond)
+    ml.cond = allocObject[TCond]()
     ml.cond[].initCond()
-    ml.lock = cast[ptr TLock](allocShared(sizeof(TLock)))
-    initializer[Tcond](ml.lock)
+    ml.lock = allocObject[TLock]()
     ml.lock[].initLock()
     when DBG: dbg "signal gInitCond"
     ml.initialized = true;
@@ -96,14 +94,12 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
   # in the future.
   gInitLock.acquire()
   block:
-    result = cast[MsgLooperPtr](allocShared(sizeof(MsgLooper)))
-    initializer[MsgLooper](result)
+    result = allocObject[MsgLooper]()
     result.name = name
     result.initialized = false;
 
     when DBG: dbg "Using createThread"
-    result.thread = cast[ptr TThread[MsgLooperPtr]]
-                    (allocShared(sizeof(TThread[MsgLooperPtr])))
+    result.thread = allocObject[TThread[MsgLooperPtr]]()
     createThread(result.thread[], looper, result)
 
     while (not result.initialized):
@@ -134,8 +130,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
   ml.lock[].acquire()
   when DBG: dbg "acquired"
   if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-    var mp = cast[MsgProcessorPtr](allocShared(sizeof(MsgProcessor)))
-    initializer[MsgProcessor](mp)
+    var mp = allocObject[MsgProcessor]()
     mp.cp = cp
     mp.mq = mq
     mp.pm = pm
