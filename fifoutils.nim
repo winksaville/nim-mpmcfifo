@@ -26,3 +26,10 @@ proc initializer*[T](dest: pointer) {.inline.} =
   var prototype: T
   copyMem(dest, addr prototype, sizeof(prototype))
 
+proc allocObject*[T](): ptr T =
+  ## Allocate T using allocShared and initialize as
+  ## a default object. You must use deallocShared
+  ## to return to the shared heap and not leak the
+  ## memory.
+  result = cast[ptr T](allocShared(sizeof(T)))
+  initializer[T](result)
