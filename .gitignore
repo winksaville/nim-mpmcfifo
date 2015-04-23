@@ -4,6 +4,7 @@
 nimcache/
 
 # Full paths
+/as
 /nakefile
 /mpmcstack
 /mpscfifo

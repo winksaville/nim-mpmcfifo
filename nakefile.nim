@@ -2,7 +2,7 @@ import nake
 
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
-    "tests/nimcache", "tests/testatomics",
+    "tests/nimcache", "tests/testatomics", "as",
     "tests/bm1", "tests/bmmpsc_otp", "tests/bmmpsc_ot"]
 
   typicalFlags = "--verbosity:1 --listCmd --embedsrc" &
@@ -72,6 +72,9 @@ task "bmmpsc_ot", "compile and run bmmpsc_ot":
 
 task "bmmpsc_ot-d", "compile and run bmmpsc_ot":
   compileRun("tests/bmmpsc_ot", debugFlags)
+
+task "as", "compile and run 'as'":
+  compileRun("./as", debugFlags)
 
 task "docs", "Buiild the documents":
   for file in docFiles:
