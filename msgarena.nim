@@ -48,20 +48,26 @@ proc initMsg(msg: MsgPtr, next: MsgPtr, rspq: QueuePtr, cmdVal: int32,
   msg.rspq = rspq
   msg.cmd = cmdVal
 
-proc newMsg(next: MsgPtr, rspq: QueuePtr, cmdVal: int32, dataSize: int): MsgPtr =
+proc newMsg(next: MsgPtr, rspq: QueuePtr, cmdVal: int32, dataSize: int):
+      MsgPtr =
   ## Allocate a new Msg.
   ## TODO: Allow dataSize other than zero
   result = cast[MsgPtr](allocShared(sizeof(Msg)))
+  var initializer: Msg
+  copyMem(result, addr initializer, sizeof(initializer))
+
   result.initMsg(next, rspq, cmdVal, nil)
 
 proc delMsg*(msg: MsgPtr) =
   ## Deallocate a Msg
   ## TODO: handle data size
-  freeShared(msg)
+  deallocShared(msg)
 
 proc newMsgArena*(): MsgArenaPtr =
   when DBG: echo "newMsgArena:+"
   result = cast[MsgArenaPtr](allocShared0(sizeof(MsgArena)))
+  var initializer: Msg
+  copyMem(result, addr initializer, sizeof(initializer))
   #result.lock.initLock()
   result.msgStack = newMpmcStack("msgStack")
   when DBG: echo "newMsgArena:-"

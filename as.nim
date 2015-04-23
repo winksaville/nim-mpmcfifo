@@ -1,13 +1,18 @@
-import locks
+import locks, strutils
+
+proc initializer[T](dest: pointer) {.inline.} =
+    var prototype: T
+    copyMem(dest, addr prototype, sizeof(prototype))
 
 type
   MsgQueuePtr* = ptr MsgQueue
   MsgQueue* = object of RootObj
     name*: string
     cond*: ptr TCond
-echo "sizeof(MsgQueue)=", sizeof(MsgQueue)
+
 proc newMpscFifo*(name: string, blocking: bool): MsgQueuePtr =
   var
+    q: MsgQueue
     mq: MsgQueuePtr = nil
     cond: ptr TCond = nil
 
@@ -16,9 +21,9 @@ proc newMpscFifo*(name: string, blocking: bool): MsgQueuePtr =
     cond[].initCond()
 
   mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
+  initializer[MsgQueue](mq)
 
-  mq.name = name
-  GC_ref(mq.name)
+  mq.name = name # increments ref, must use GC_unfre in delMpscFifo
   mq.cond = cond
 
   result = mq

@@ -1,5 +1,5 @@
 import os, locks
-import msg, mpscfifo, msgarena
+import msg, mpscfifo, msgarena, initializer
 
 import msgloopertypes
 export msgloopertypes
@@ -95,6 +95,7 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
   gInitLock.acquire()
   block:
     result = cast[MsgLooperPtr](allocShared(sizeof(MsgLooper)))
+    initializer[MsgLooper](result)
     result.name = name
     result.initialized = false;
 
@@ -132,6 +133,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
   when DBG: dbg "acquired"
   if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
     var mp = cast[MsgProcessorPtr](allocShared(sizeof(MsgProcessor)))
+    initializer[MsgProcessor](mp)
     mp.cp = cp
     mp.mq = mq
     mp.pm = pm

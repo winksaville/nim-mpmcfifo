@@ -74,6 +74,9 @@ task "bmmpsc_ot-d", "compile and run bmmpsc_ot":
   compileRun("tests/bmmpsc_ot", debugFlags)
 
 task "as", "compile and run 'as'":
+  compileRun("./as", releaseFlags)
+
+task "as-d", "compile and run 'as'":
   compileRun("./as", debugFlags)
 
 task "docs", "Buiild the documents":

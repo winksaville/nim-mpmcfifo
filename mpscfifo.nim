@@ -56,20 +56,21 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     owner: bool, condBool: ptr bool, cond: ptr TCond, lock: ptr TLock,
     blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
-  var mq = cast[MsgQueuePtr](allocShared0(sizeof(MsgQueue)))
+  var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
+  var initializer: MsgQueue
+  copyMem(mq, addr initializer, sizeof(initializer))
   when DBG:
     proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
     dbg "+"
 
-  mq.name = name
-  GC_ref(mq.name)
+  mq.name = name # increments ref, must use GC_unfre in delMpscFifo
   mq.arena = arena
   mq.blocking = blocking
   mq.ownsCondAndLock = owner
   mq.condBool = condBool
   mq.cond = cond
   mq.lock = lock
-  var mn = mq.arena.getMsg(nil, nil, 0, 0)
+  var mn = mq.arena.getMsg(0) # initial stub
   mq.head = mn
   mq.tail = mn
   result = mq
