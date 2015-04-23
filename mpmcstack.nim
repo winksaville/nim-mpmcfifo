@@ -1,7 +1,7 @@
 ## Lock free stack of LinkNode's
 ##
 ## This implemenation uses a linked list of LinkNode's
-import msg, typeinfo, strutils
+import msg, fifoutils, typeinfo, strutils
 
 const
   DBG = false
@@ -17,12 +17,6 @@ iterator items*(stk: StackPtr): MsgPtr {.inline.} =
   while cur != addr stk.tos:
     yield cur
     cur = cur.next
-
-proc ptrToStr(label: string, p: pointer): string =
-  if p == nil:
-    result = label & "<nil>"
-  else:
-    result = label & "0x" & toHex(cast[int](p), sizeof(p)*2)
 
 proc `$`*(stk: StackPtr): string =
     if stk == nil:
@@ -48,6 +42,7 @@ proc isEmpty(stk: StackPtr): bool {.inline.} =
 proc newMpmcStack*(name: string): StackPtr =
   ## Create a new Fifo
   var stk = cast[StackPtr](allocShared(sizeof(Stack)))
+  initializer[Stack](stk)
   when DBG:
     proc dbg(s:string) = echo name & ".newMpmcStack(name)" & s
     dbg "+"

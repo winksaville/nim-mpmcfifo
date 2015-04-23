@@ -1,5 +1,5 @@
 import os, locks
-import msg, mpscfifo, msgarena, initializer
+import msg, mpscfifo, msgarena, fifoutils
 
 import msgloopertypes
 export msgloopertypes
@@ -32,8 +32,10 @@ proc looper(ml: MsgLooperPtr) =
     ml.condBool = cast[ptr bool](allocShared(sizeof(bool)))
     ml.condBool[] = false
     ml.cond = cast[ptr TCond](allocShared(sizeof(TCond)))
+    initializer[TCond](ml.cond)
     ml.cond[].initCond()
     ml.lock = cast[ptr TLock](allocShared(sizeof(TLock)))
+    initializer[Tcond](ml.lock)
     ml.lock[].initLock()
     when DBG: dbg "signal gInitCond"
     ml.initialized = true;

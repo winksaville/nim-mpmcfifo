@@ -14,7 +14,7 @@
 ## ....
 ##
 
-import msg, msgarena, msgloopertypes, locks, strutils
+import msg, msgarena, msgloopertypes, fifoutils, locks, strutils
 
 const
   DBG = false
@@ -57,8 +57,7 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     blocking: Blocking): MsgQueuePtr =
   ## Create a new Fifo
   var mq = cast[MsgQueuePtr](allocShared(sizeof(MsgQueue)))
-  var initializer: MsgQueue
-  copyMem(mq, addr initializer, sizeof(initializer))
+  initializer[MsgQueue](mq)
   when DBG:
     proc dbg(s:string) = echo name & ".newMpscFifo(name,ma):" & s
     dbg "+"
@@ -89,10 +88,14 @@ proc newMpscFifo*(name: string, arena: MsgArenaPtr, blocking: Blocking):
   if blocking == blockIfEmpty:
     owned = true
     condBool = cast[ptr bool](allocShared(sizeof(bool)))
-    cond = cast[ptr TCond](allocShared0(sizeof(TCond)))
-    lock = cast[ptr TLock](allocShared0(sizeof(TLock)))
     condBool[] = false
+
+    cond = cast[ptr TCond](allocShared(sizeof(TCond)))
+    initializer[TCond](cond)
     cond[].initCond()
+
+    lock = cast[ptr TLock](allocShared0(sizeof(TLock)))
+    initializer[TLock](lock)
     lock[].initLock()
 
   result = newMpscFifo(name, arena, owned, condBool, cond, lock, blocking)

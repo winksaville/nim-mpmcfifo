@@ -20,7 +20,7 @@ suite "mpscfifo", 0.25:
     mq.delMpscFifo()
     ma.delMsgArena()
 
-  # mpscfifo.bm add/rmv blocking: ts={min=118cy mean=197cy minC=21 n=5193334}
+  # mpscfifo.bm add/rmv blocking: ts={min=290cy mean=311cy minC=189 n=10443614}
   test "bm add/rmv blocking", timeLoops, tsa:
     mq.add(msg)
     msg = mq.rmv()
@@ -33,7 +33,7 @@ suite "mpscfifo", 0.25:
     mq.delMpscFifo()
     ma.delMsgArena()
 
-  # mpscfifo.bm get/add/rmv/ret blocking: ts={min=253cy mean=293cy minC=524 n=4878547}
+  # mpscfifo.bm get/add/rmv/ret blocking: ts={min=318cy mean=347cy minC=674 n=10181401}
   test "bm get/add/rmv/ret blocking", timeLoops, tsa:
     msg = ma.getMsg(nil, nil, 2, 0)
     mq.add(msg)
@@ -44,13 +44,13 @@ suite "mpscfifo", 0.25:
   setup:
     ma = newMsgArena()
     mq = newMpscFifo("fifo", ma, nilIfEmpty)
-    msg = ma.getMsg(nil, nil, 2, 0)
+    msg = ma.getMsg(2)
   teardown:
     ma.retMsg(msg)
     mq.delMpscFifo()
     ma.delMsgArena()
 
-  # mpscfifo.bm add/rmv non-blocking: ts={min=10cy mean=40cy minC=9 Vn=5195976}
+  # mpscfifo.bm add/rmv non-blocking: ts={min=20cy mean=50cy minC=62575 n=12255097}
   test "bm add/rmv non-blocking", timeLoops, tsa:
     mq.add(msg)
     msg = mq.rmv()
@@ -63,9 +63,9 @@ suite "mpscfifo", 0.25:
     mq.delMpscFifo()
     ma.delMsgArena()
 
-  # mpscfifo.bm get/add/rmv/ret non-blocking: ts={min=82cy mean=104cy minC=11 n=5084526}
+  # mpscfifo.bm get/add/rmv/ret non-blocking: ts={min=74cy mean=85cy minC=29 n=12491402}
   test "bm get/add/rmv/ret non-blocking", timeLoops, tsa:
-    msg = ma.getMsg(nil, nil, 2, 0)
+    msg = ma.getMsg(2)
     mq.add(msg)
     msg = mq.rmv()
     ma.retMsg(msg)

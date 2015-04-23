@@ -1,6 +1,6 @@
 ## The MsgArena manages getting and returning message from memory
 ## in a thread safe manner and so maybe shared by multipel threads.
-import msg, mpmcstack, locks, strutils
+import msg, mpmcstack, fifoutils, locks, strutils
 
 const
   DBG = false
@@ -11,12 +11,6 @@ type
   MsgArena* = object
     #lock: TLock
     msgStack: StackPtr
-
-proc ptrToStr(label: string, p: pointer): string =
-  if p == nil:
-    result = label & "<nil>"
-  else:
-    result = label & "0x" & toHex(cast[int](p), sizeof(p)*2)
 
 proc `$`*(ma: MsgArenaPtr): string =
   if ma == nil:
@@ -53,8 +47,7 @@ proc newMsg(next: MsgPtr, rspq: QueuePtr, cmdVal: int32, dataSize: int):
   ## Allocate a new Msg.
   ## TODO: Allow dataSize other than zero
   result = cast[MsgPtr](allocShared(sizeof(Msg)))
-  var initializer: Msg
-  copyMem(result, addr initializer, sizeof(initializer))
+  initializer[Msg](result)
 
   result.initMsg(next, rspq, cmdVal, nil)
 
@@ -66,8 +59,7 @@ proc delMsg*(msg: MsgPtr) =
 proc newMsgArena*(): MsgArenaPtr =
   when DBG: echo "newMsgArena:+"
   result = cast[MsgArenaPtr](allocShared0(sizeof(MsgArena)))
-  var initializer: Msg
-  copyMem(result, addr initializer, sizeof(initializer))
+  initializer[MsgArena](result)
   #result.lock.initLock()
   result.msgStack = newMpmcStack("msgStack")
   when DBG: echo "newMsgArena:-"
