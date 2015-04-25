@@ -8,6 +8,7 @@ nimcache/
 /nakefile
 /mpmcstack
 /mpscfifo
+/statemachine
 /tests/testatomics
 /tests/bm1
 /tests/bm2

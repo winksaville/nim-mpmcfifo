@@ -2,6 +2,7 @@ import nake
 
 var
   buildArtifacts = @["nimcache", "mpscfifo", "mpmcstack",
+    "statemachine",
     "tests/nimcache", "tests/testatomics", "as",
     "tests/bm1", "tests/bmmpsc_otp", "tests/bmmpsc_ot"]
 
@@ -51,6 +52,9 @@ task "mpscfifo", "compile and run mpscfifo":
 
 task "mpmcstack", "compile and run mpmcstack":
   compileRun("./mpmcstack")
+
+task "statemachine", "compile and run mpmcstack":
+  compileRun("./statemachine")
 
 task "testatomics", "compile and run testatomics":
   compileRun("tests/testatomics")
