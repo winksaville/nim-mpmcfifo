@@ -49,7 +49,7 @@ proc newMsg(next: MsgPtr, rspq: QueuePtr, cmdVal: int32, dataSize: int):
   result = allocObject[Msg]()
   result.initMsg(next, rspq, cmdVal, nil)
 
-proc delMsg*(msg: MsgPtr) =
+proc delMsg(msg: MsgPtr) =
   ## Deallocate a Msg
   ## TODO: handle data size
   deallocShared(msg)
@@ -57,14 +57,11 @@ proc delMsg*(msg: MsgPtr) =
 proc newMsgArena*(): MsgArenaPtr =
   when DBG: echo "newMsgArena:+"
   result = allocObject[MsgArena]()
-  #result.lock.initLock()
   result.msgStack = newMpmcStack("msgStack")
   when DBG: echo "newMsgArena:-"
 
 proc delMsgArena*(ma: MsgArenaPtr) =
   when DBG: echo "delMsgArena:+"
-  #ma.lock.acquire()
-  #when DBG: echo "delMsgArena: lock accquired"
   block:
     while true:
       var msg = ma.msgStack.pop()
@@ -73,8 +70,6 @@ proc delMsgArena*(ma: MsgArenaPtr) =
       delMsg(msg)
 
     ma.msgStack.delMpmcStack()
-  #ma.lock.release()
-  #ma.lock.deinitLock()
   deallocShared(ma)
   when DBG: echo "delMsgArena:-"
 
