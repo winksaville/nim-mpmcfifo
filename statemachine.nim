@@ -2,23 +2,23 @@ import msg, msgarena, msglooper, mpscfifo, fifoutils
 
 type
   StateMachinePtr = ptr StateMachine
+  SmProcessMsg = proc(sm: StateMachinePtr, msg: MsgPtr)
   StateMachine* = object of Component
     protocols: seq[int]
-    curState: ProcessMsg
+    curState: SmProcessMsg
 
 proc dispatcher(cp: ComponentPtr, msg: MsgPtr) =
   var sm = cast[StateMachinePtr](cp)
   sm.curState(sm, msg)
 
-proc initStateMachine*(sm: StateMachinePtr, name: string, initialState: ProcessMsg,
-      rcvq: QueuePtr) =
+proc initStateMachine*(sm: StateMachinePtr, name: string,
+      initialState: SmProcessMsg, rcvq: QueuePtr) =
   sm.name = name
   sm.pm = dispatcher
   sm.curState = initialState
   sm.rcvq = rcvq
 
-proc transitionTo(cp: ComponentPtr, pm: ProcessMsg) =
-  var sm = cast[StateMachinePtr](cp)
+proc transitionTo(sm: StateMachinePtr, pm: SmProcessMsg) =
   sm.curState = pm
 
 when isMainModule:
@@ -31,14 +31,14 @@ when isMainModule:
         ma: MsgArenaPtr
         ml: MsgLooperPtr
 
-    proc s1(sm: ComponentPtr, msg: MsgPtr)
+    proc s1(sm: StateMachinePtr, msg: MsgPtr)
 
-    proc s0(sm: ComponentPtr, msg: MsgPtr) =
+    proc s0(sm: StateMachinePtr, msg: MsgPtr) =
       echo "s0"
       sm.transitionTo(s1)
       msg.rspq.add(msg)
 
-    proc s1(sm: ComponentPtr, msg: MsgPtr) =
+    proc s1(sm: StateMachinePtr, msg: MsgPtr) =
       echo "s1"
       sm.transitionTo(s0)
       msg.rspq.add(msg)
