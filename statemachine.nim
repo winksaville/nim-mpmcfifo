@@ -9,7 +9,8 @@ type
 
 proc dispatcher(cp: ComponentPtr, msg: MsgPtr) =
   var sm = cast[StateMachinePtr](cp)
-  sm.curState(sm, msg)
+  var x: SmProcessMsg = sm.curState
+  x(sm, msg)
 
 proc initStateMachine*(sm: StateMachinePtr, name: string,
       initialState: SmProcessMsg, rcvq: QueuePtr) =
@@ -35,12 +36,12 @@ when isMainModule:
 
     proc s0(sm: StateMachinePtr, msg: MsgPtr) =
       echo "s0"
-      sm.transitionTo(s1)
+      transitionTo(sm, s1)
       msg.rspq.add(msg)
 
     proc s1(sm: StateMachinePtr, msg: MsgPtr) =
       echo "s1"
-      sm.transitionTo(s0)
+      transitionTo(sm, s0)
       msg.rspq.add(msg)
 
     proc newSmT1(): ptr SmT1 =
@@ -48,7 +49,7 @@ when isMainModule:
       result.ma = newMsgArena()
       result.ml = newMsgLooper("ml1")
       result.rcvq = newMpscFifo("fifo", result.ma, result.ml)
-      result.initStateMachine("smt1", s0, result.rcvq)
+      initStateMachine(result, "smt1", s0, result.rcvq)
       result.ml.addProcessMsg(result)
     var
       smT1: ptr SmT1
