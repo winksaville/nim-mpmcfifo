@@ -9,8 +9,7 @@ type
 
 proc dispatcher(cp: ComponentPtr, msg: MsgPtr) =
   var sm = cast[StateMachinePtr](cp)
-  var x: SmProcessMsg = sm.curState
-  x(sm, msg)
+  sm.curState(sm, msg)
 
 proc initStateMachine*(sm: StateMachinePtr, name: string,
       initialState: SmProcessMsg, rcvq: QueuePtr) =
