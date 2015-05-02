@@ -47,6 +47,12 @@ proc fullCompileRun(fullPath: string, flags: string = buildFlags) =
   compileNim(fullPath, flags)
   runNim(fullPath)
 
+task "sm", "compile and run bm1":
+  compileRun("./statemachine", releaseFlags)
+
+task "sm-d", "compile and run bm1":
+  compileRun("./statemachine", debugFlags)
+
 task "mpscfifo", "compile and run mpscfifo":
   compileRun("./mpscfifo")
 

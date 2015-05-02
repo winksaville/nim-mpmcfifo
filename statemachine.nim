@@ -1,46 +1,50 @@
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 
 type
-  StateMachinePtr = ptr StateMachine
-  SmProcessMsg = proc(sm: StateMachinePtr, msg: MsgPtr)
-  StateMachine* = object of Component
+  StateMachine*[TypeState] = object of Component
     protocols: seq[int]
-    curState: SmProcessMsg
+    curState: TypeState
 
-proc dispatcher(cp: ComponentPtr, msg: MsgPtr) =
-  var sm = cast[StateMachinePtr](cp)
+proc dispatcher[TypeStateMachine](cp: ComponentPtr, msg: MsgPtr) =
+  var sm = cast[ptr TypeStateMachine](cp)
   sm.curState(sm, msg)
 
-proc initStateMachine*(sm: StateMachinePtr, name: string,
-      initialState: SmProcessMsg, rcvq: QueuePtr) =
+proc initStateMachine*[TypeState](sm: ptr StateMachine[TypeState], name: string,
+    dispatcher: ProcessMsg, initialState: TypeState, rcvq: QueuePtr) =
   sm.name = name
   sm.pm = dispatcher
   sm.curState = initialState
   sm.rcvq = rcvq
 
-proc transitionTo(sm: StateMachinePtr, pm: SmProcessMsg) =
-  sm.curState = pm
+proc transitionTo[TypeState](sm: ptr StateMachine[TypeState], state: TypeState) =
+  sm.curState = state
 
 when isMainModule:
   import unittest
 
   suite "t1":
     type
-      SmT1 = object of StateMachine
-        count: int
+      MlSmBase[TypeState] = object of StateMachine[TypeState]
         ma: MsgArenaPtr
         ml: MsgLooperPtr
 
-    proc s1(sm: StateMachinePtr, msg: MsgPtr)
+      ## SmT1 is a statemachine with 2 states s0 and s1
+      SmT1State = proc(sm: ptr SmT1, msg: MsgPtr)
+      SmT1 = object of MlSmBase[SmT1State]
+        count: int
 
-    proc s0(sm: StateMachinePtr, msg: MsgPtr) =
-      echo "s0"
-      transitionTo(sm, s1)
+    proc s1(sm: ptr SmT1, msg: MsgPtr)
+
+    proc s0(sm: ptr SmT1, msg: MsgPtr) =
+      sm.count += 1
+      echo "s0: count=", sm.count
+      transitionTo[SmT1State](sm, s1)
       msg.rspq.add(msg)
 
-    proc s1(sm: StateMachinePtr, msg: MsgPtr) =
-      echo "s1"
-      transitionTo(sm, s0)
+    proc s1(sm: ptr SmT1, msg: MsgPtr) =
+      sm.count += 1
+      echo "s1: count=", sm.count
+      transitionTo[SmT1State](sm, s0)
       msg.rspq.add(msg)
 
     proc newSmT1(): ptr SmT1 =
@@ -48,8 +52,9 @@ when isMainModule:
       result.ma = newMsgArena()
       result.ml = newMsgLooper("ml1")
       result.rcvq = newMpscFifo("fifo", result.ma, result.ml)
-      initStateMachine(result, "smt1", s0, result.rcvq)
+      initStateMachine[SmT1State](result, "smt1", dispatcher[SmT1], s0, result.rcvq)
       result.ml.addProcessMsg(result)
+
     var
       smT1: ptr SmT1
 
