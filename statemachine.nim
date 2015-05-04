@@ -2,23 +2,34 @@ import msg, msgarena, msglooper, mpscfifo, fifoutils
 
 type
   StateMachine*[TypeState] = object of Component
-    protocols: seq[int]
-    curState: TypeState
+    protocols*: seq[int]
+    curState*: TypeState
+    ma*: MsgArenaPtr
+    ml*: MsgLooperPtr
 
 proc dispatcher[TypeStateMachine](cp: ComponentPtr, msg: MsgPtr) =
   ## dispatcher cast cp to a TypeStateMachine and call current state
   var sm = cast[ptr TypeStateMachine](cp)
   sm.curState(sm, msg)
 
-proc initStateMachine*[TypeState](sm: ptr StateMachine[TypeState], name: string,
-    dispatcher: ProcessMsg, initialState: TypeState, rcvq: QueuePtr) =
+proc initStateMachine*[TypeStateMachine, TypeState](sm: ptr StateMachine[TypeState],
+    name: string, initialState: TypeState) =
   ## Initialize StateMachine
   sm.name = name
-  sm.pm = dispatcher
+  sm.pm = dispatcher[TypeStateMachine]
+  sm.ma = newMsgArena()
+  sm.ml = newMsgLooper("ml_" & name)
+  sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
   sm.curState = initialState
-  sm.rcvq = rcvq
+  sm.ml.addProcessMsg(sm)
 
-proc transitionTo[TypeState](sm: ptr StateMachine[TypeState], state: TypeState) =
+proc deinitStateMachine*[TypeState](sm: ptr StateMachine[TypeState]) =
+  ## deinitialize StateMachine
+  sm.ml.delMsgLooper()
+  sm.rcvq.delMpscFifo()
+  sm.ma.delMsgArena()
+
+proc transitionTo*[TypeState](sm: ptr StateMachine[TypeState], state: TypeState) =
   ## Transition to a new state
   sm.curState = state
 
@@ -27,13 +38,8 @@ when isMainModule:
 
   suite "t1":
     type
-      MlSmBase[TypeState] = object of StateMachine[TypeState]
-        ## A MsgLooper StateMachine
-        ma: MsgArenaPtr
-        ml: MsgLooperPtr
-
       SmT1State = proc(sm: ptr SmT1, msg: MsgPtr)
-      SmT1 = object of MlSmBase[SmT1State]
+      SmT1 = object of StateMachine[SmT1State]
         ## SmT1 is a statemachine with a counter
         count: int
         s0Count: int
@@ -62,17 +68,19 @@ when isMainModule:
     proc newSmT1(): ptr SmT1 =
       ## Create a new SmT1 state machine
       result = allocObject[SmT1]()
-      result.ma = newMsgArena()
-      result.ml = newMsgLooper("ml1")
-      result.rcvq = newMpscFifo("fifo", result.ma, result.ml)
-      initStateMachine[SmT1State](result, "smt1", dispatcher[SmT1], s0, result.rcvq)
-      result.ml.addProcessMsg(result)
+      initStateMachine[SmT1, SmT1State](result, "smt1", s0)
+
+    proc delSmT1(sm: ptr SmT1) =
+      deinitStateMachine[SmT1State](sm)
 
     var
       smT1: ptr SmT1
 
     setup:
       smT1 = newSmT1()
+
+    teardown:
+      smT1.delSmt1()
 
     test "transition":
       var
