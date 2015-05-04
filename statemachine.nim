@@ -1,3 +1,7 @@
+## A state machine where the current state is defined as
+## a process to exeucte. This will evolve into a hierarchical
+## state machine with enter and exit methods and problably
+## using templates or macros to make it easy to use.
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 
 type
