@@ -14,8 +14,10 @@ type
     mq*: QueuePtr
     cp*: ComponentPtr
     newComponent*: NewComponent
+    delComponent*: DelComponent
 
   NewComponent* = proc(ml: MsgLooperPtr): ComponentPtr
+  DelComponent* = proc(cp: ComponentPtr)
 
   MsgLooperPtr* = ptr MsgLooper
   MsgLooper* = object

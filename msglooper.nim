@@ -55,11 +55,26 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
+      if mp == nil:
+        # mp has been deleted
+        continue
       if mp.cp == nil:
+        # a component has been added
         mp.cp = mp.newComponent(ml)
         mp.mq = mp.cp.rcvq
         mp.pm = mp.cp.pm
-        ml.condBool[] = false
+        atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
+      elif mp.mq == nil:
+        # a component has been deleted
+        mp.delComponent(mp.cp)
+        mp = nil
+        mp.pm = nil
+        mp.cp = nil
+        mp.delComponent = nil
+        mp.newComponent = nil
+        atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
+        continue
+
       var msg = mp.mq.rmv(nilIfEmpty)
       if msg != nil:
         processedAtLeastOneMsg = true
@@ -124,6 +139,26 @@ proc delMsgLooper*(ml: MsgLooperPtr) =
     proc dbg(s:string) = echo ml.name & ".delMsgLooper:" & s
     dbg "DOES NOTHING YET"
 
+proc ping(ml: MsgLooperPtr) =
+  ml.lock[].acquire()
+  ml.condBool[] = true
+  ml.cond[].signal()
+  ml.lock[].release()
+
+proc allocMsgProcessor(cp: ComponentPtr, mq: MsgQueuePtr,
+    pm: ProcessMsg): MsgProcessorPtr =
+  result = allocObject[MsgProcessor]()
+  result.cp = cp
+  result.mq = mq
+  result.pm = pm
+
+proc allocMsgProcessor(newComponent: NewComponent): MsgProcessorPtr =
+  result = allocObject[MsgProcessor]()
+  result.cp = nil
+  result.mq = nil
+  result.pm = nil
+  result.newComponent = newComponent
+
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
     cp: ComponentPtr) =
   ## Add the ProcessMsg funtion and its associated Queue to this looper.
@@ -132,24 +167,30 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
   when DBG:
     proc dbg(s:string) = echo ml.name & ".addMsgProcessor:" & s
     dbg "+"
-  ml.lock[].acquire()
-  when DBG: dbg "acquired"
-  if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-    var mp = allocObject[MsgProcessor]()
-    mp.cp = cp
-    mp.mq = mq
-    mp.pm = pm
-    ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
-    ml.listMsgProcessorLen += 1
-    ml.condBool[] = false
-    ml.cond[].signal()
-  else:
-    doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
-      "Attempted to add too many ProcessMsg, maximum is " &
-      $listMsgProcessorMaxLen)
 
-  ml.lock[].release()
-  when DBG: dbg "-"
+  # See if there is an empty slot
+  var added = false
+  for idx in 0..ml.listMsgProcessorLen-1:
+    var mp = ml.listMsgProcessor[idx]
+    if mp == nil:
+      var mp = allocMsgProcessor(cp, mq, pm)
+      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+      ping(ml)
+      added = true
+
+  if not added:
+    # No empty slots try to append
+    if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
+      var mp = allocMsgProcessor(cp, mq, pm)
+      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+      ml.listMsgProcessorLen += 1
+      ping(ml)
+    else:
+      doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
+        "Attempted to add too many ProcessMsg, maximum is " &
+        $listMsgProcessorMaxLen)
+
+  when DBG: dbg "- added a new entry"
 
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
   addProcessMsg(ml, pm, q, nil)
@@ -171,28 +212,45 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
   when DBG:
     proc dbg(s:string) = echo ml.name & ".addComponent:" & s
     dbg "+"
-  ml.lock[].acquire()
   var mp: MsgProcessorPtr
-  when DBG: dbg "acquired"
-  if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-    mp = allocObject[MsgProcessor]()
-    mp.mq = nil
-    mp.pm = nil
-    mp.newComponent = newComponent
-    ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
-    ml.listMsgProcessorLen += 1
-    #var rcvq = newMpscFifo("x", ma)
-    #var msg = ma.getMsg(rcvq, 0)
-    ml.condBool[] = true
-    ml.cond[].signal()
-  else:
-    doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
-      "Attempted to add too many ProcessMsg, maximum is " &
-      $listMsgProcessorMaxLen)
 
-  ml.lock[].release()
+  # See if there is an empty slot
+  var added = false
+  for idx in 0..ml.listMsgProcessorLen-1:
+    var mp = ml.listMsgProcessor[idx]
+    if mp == nil:
+      when DBG: dbg "replacing old entry"
+      mp = allocMsgProcessor(newComponent)
+      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+      ml.listMsgProcessorLen += 1
+      ping(ml)
+      added = true
+  
+  if not added:
+    # No empty slots try to append
+    if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
+      when DBG: dbg "appending new entry"
+      mp = allocMsgProcessor(newComponent)
+      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+      ml.listMsgProcessorLen += 1
+      ping(ml)
+    else:
+      doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
+        "Attempted to add too many ProcessMsg, maximum is " &
+        $listMsgProcessorMaxLen)
+
+  #ml.lock[].release()
   when DBG: dbg " sleeping.."
   # TODO: This needs to be done correctly!!!!
   sleep(100)
   result = cast[ptr ComponentType](mp.cp)
   when DBG: dbg "-"
+
+proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
+    delComponent: DelComponent) =
+  ## Delete a component
+  for idx in 0..ml.listMsgProcessorLen-1:
+    var mp = ml.listMsgProcessor[idx]
+    if mp != nil and mp.cp == cp:
+      mp.delComponent = delComponent
+      atomicStoreN(addr mp.mq, nil, ATOMIC_RELEASE)
