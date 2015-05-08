@@ -147,7 +147,7 @@ when isMainModule:
       addState[SmT1State](smT1, default)
       startStateMachine[SmT1State](smT1, default)
       echo "newSmT1X: x"
-      result = cast[ptr Component](smT1)
+      result = smT1
 
     proc delSmT1(sm: ptr SmT1) =
       deinitStateMachine[SmT1State](sm)
@@ -158,7 +158,7 @@ when isMainModule:
     # Tests default as the one and only state
     setup:
       var ml = newMsgLooper("ml_smt1")
-      smT1 = cast[ptr SmT1](ml.addComponent(newSmT1X))
+      smT1 = addComponent[SmT1](ml, newSmT1X)
       echo "setup: smT1=", ptrToStr(smT1)
 
     teardown:

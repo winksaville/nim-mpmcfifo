@@ -157,7 +157,8 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
 proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
   addProcessMsg(ml, cp.pm, cp.rcvq, cp)
 
-proc addComponent*(ml: MsgLooperPtr, newComponent: NewComponent): ptr Component =
+proc addComponent*[ComponentType](ml: MsgLooperPtr,
+    newComponent: NewComponent): ptr ComponentType =
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
   ## in that thread allowing the component to be gcsafe and use the
@@ -193,5 +194,5 @@ proc addComponent*(ml: MsgLooperPtr, newComponent: NewComponent): ptr Component 
   when DBG: dbg " sleeping.."
   # TODO: This needs to be done correctly!!!!
   sleep(100)
-  result = mp.cp
+  result = cast[ptr ComponentType](mp.cp)
   when DBG: dbg "-"
