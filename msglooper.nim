@@ -7,7 +7,7 @@ export msgloopertypes
 const
   DBG = false
 
-# Global initialization lock and cond use to have newMsgLooper not return
+# Global itnitialization lock and cond use to have newMsgLooper not return
 # until looper has startend and MsgLooper is completely initialized.
 var
   gInitLock: TLock
@@ -16,7 +16,7 @@ var
 gInitLock.initLock()
 gInitCond.initCond()
 
-proc looper(ml: MsgLooperPtr) =
+proc looper(ml: MsgLooperPtr) {.thread.} =
   when DBG:
     proc dbg(s: string) = echo ml.name & ".looper" & s
     dbg "+"
@@ -55,6 +55,11 @@ proc looper(ml: MsgLooperPtr) =
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
+      if mp.cp == nil:
+        mp.cp = mp.newComponent(ml)
+        mp.mq = mp.cp.rcvq
+        mp.pm = mp.cp.pm
+        ml.condBool[] = false
       var msg = mp.mq.rmv(nilIfEmpty)
       if msg != nil:
         processedAtLeastOneMsg = true
@@ -136,6 +141,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
     mp.pm = pm
     ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
     ml.listMsgProcessorLen += 1
+    ml.condBool[] = false
     ml.cond[].signal()
   else:
     doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
@@ -151,3 +157,41 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
 proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
   addProcessMsg(ml, cp.pm, cp.rcvq, cp)
 
+proc addComponent*(ml: MsgLooperPtr, newComponent: NewComponent): ptr Component =
+  ## Add a component to this looper. The newComponent proc is called
+  ## from within the looper thread and thus all allocation is done
+  ## in that thread allowing the component to be gcsafe and use the
+  ## threads heap.
+  ##
+  ## TODO: This must block until newComponent completes!!!!
+  ## What I'd like to do is send a message to looper with a
+  ## rspq that this will wait on.
+  ##
+  when DBG:
+    proc dbg(s:string) = echo ml.name & ".addComponent:" & s
+    dbg "+"
+  ml.lock[].acquire()
+  var mp: MsgProcessorPtr
+  when DBG: dbg "acquired"
+  if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
+    mp = allocObject[MsgProcessor]()
+    mp.mq = nil
+    mp.pm = nil
+    mp.newComponent = newComponent
+    ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+    ml.listMsgProcessorLen += 1
+    #var rcvq = newMpscFifo("x", ma)
+    #var msg = ma.getMsg(rcvq, 0)
+    ml.condBool[] = true
+    ml.cond[].signal()
+  else:
+    doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
+      "Attempted to add too many ProcessMsg, maximum is " &
+      $listMsgProcessorMaxLen)
+
+  ml.lock[].release()
+  when DBG: dbg " sleeping.."
+  # TODO: This needs to be done correctly!!!!
+  sleep(100)
+  result = mp.cp
+  when DBG: dbg "-"

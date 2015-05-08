@@ -52,6 +52,19 @@ proc initStateMachine*[TypeStateMachine, TypeState](sm: ptr StateMachine[TypeSta
   sm.curState = nil
   sm.ml.addProcessMsg(sm)
 
+proc initStateMachineX*[TypeStateMachine, TypeState](sm: ptr StateMachine[TypeState],
+    name: string, ml: MsgLooperPtr) =
+  ## Initialize StateMachine
+  echo "initStateMacineX: e"
+  sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
+  sm.name = name
+  sm.pm = dispatcher[TypeStateMachine]
+  sm.ma = newMsgArena()
+  sm.ml = ml
+  sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
+  sm.curState = nil
+  echo "initStateMacineX: x sm.ma=", sm.ma
+
 proc deinitStateMachine*[TypeState](sm: ptr StateMachine[TypeState]) =
   ## deinitialize StateMachine
   sm.ml.delMsgLooper()
@@ -123,6 +136,19 @@ when isMainModule:
       result = allocObject[SmT1]()
       initStateMachine[SmT1, SmT1State](result, "smt1")
 
+    proc newSmT1X(ml: MsgLooperPtr): ptr Component =
+      echo "newSmT1X: e"
+      ## Create a new SmT1 state machine
+      var
+        smT1: ptr SmT1
+      smT1 = allocObject[SmT1]()
+      initStateMachineX[SmT1, SmT1State](smT1, "smt1", ml)
+
+      addState[SmT1State](smT1, default)
+      startStateMachine[SmT1State](smT1, default)
+      echo "newSmT1X: x"
+      result = cast[ptr Component](smT1)
+
     proc delSmT1(sm: ptr SmT1) =
       deinitStateMachine[SmT1State](sm)
 
@@ -131,14 +157,15 @@ when isMainModule:
 
     # Tests default as the one and only state
     setup:
-      smT1 = newSmT1()
-      addState[SmT1State](smT1, default)
-      startStateMachine[SmT1State](smT1, default)
+      var ml = newMsgLooper("ml_smt1")
+      smT1 = cast[ptr SmT1](ml.addComponent(newSmT1X))
+      echo "setup: smT1=", ptrToStr(smT1)
 
     teardown:
       smT1.delSmt1()
 
     test "test-one-state":
+      echo "test-one-state"
       var
         rcvq = newMpscFifo("rcvq", smT1.ma)
         msg: MsgPtr

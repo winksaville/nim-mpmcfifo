@@ -13,9 +13,11 @@ type
     pm*: ProcessMsg
     mq*: QueuePtr
     cp*: ComponentPtr
+    newComponent*: NewComponent
+
+  NewComponent* = proc(ml: MsgLooperPtr): ComponentPtr
 
   MsgLooperPtr* = ptr MsgLooper
-
   MsgLooper* = object
     name*: string
     initialized*: bool
