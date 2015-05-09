@@ -29,6 +29,10 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
     ml.listMsgProcessor = cast[ptr array[0..listMsgProcessorMaxLen-1,
               MsgProcessorPtr]](allocShared(sizeof(MsgProcessorPtr) *
                                                   listMsgProcessorMaxLen))
+    for idx in 0..listMsgProcessorMaxLen-1:
+      var mp = allocObject[MsgProcessor]()
+      mp.state = empty
+      ml.listMsgProcessor[idx] = mp
     ml.condBool = cast[ptr bool](allocShared(sizeof(bool)))
     ml.condBool[] = false
     ml.cond = allocObject[TCond]()
@@ -55,48 +59,41 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
     var processedAtLeastOneMsg = false
     for idx in 0..ml.listMsgProcessorLen-1:
       var mp = ml.listMsgProcessor[idx]
-      if mp == nil:
-        # mp has been deleted
-        continue
-      if mp.cp == nil:
-        # a component has been added
-        mp.cp = mp.newComponent(ml)
-        mp.mq = mp.cp.rcvq
-        mp.pm = mp.cp.pm
+      case atomicLoadN[MsgProcessorState](addr mp.state, ATOMIC_ACQUIRE)
+      of empty, busy:
+        when DBG: dbg " empty/busy idx=" & $idx
+      of adding:
+        when DBG: dbg " adding idx=" & $idx
+        var cp = mp.newComponent(ml)
+        mp.cp = cp
+        mp.mq = cp.rcvq
+        mp.pm = cp.pm
+        mp.state = full
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
-      elif mp.mq == nil:
-        # a component has been deleted
+        when DBG: dbg " added  idx=" & $idx
+      of full:
+        var msg = mp.mq.rmv(nilIfEmpty)
+        if msg != nil:
+          processedAtLeastOneMsg = true
+          when DBG: dbg " full processing msg=" & $msg
+          mp.pm(mp.cp, msg)
+          # Cannot assume msg is valid here
+        else:
+          when DBG: dbg " full no msgs idx=" & $idx
+      of deleting:
+        when DBG: dbg " deleting idx=" & $idx
         mp.delComponent(mp.cp)
-        mp = nil
-        mp.pm = nil
-        mp.cp = nil
-        mp.delComponent = nil
-        mp.newComponent = nil
+        mp.state = empty
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
-        continue
-
-      var msg = mp.mq.rmv(nilIfEmpty)
-      if msg != nil:
-        processedAtLeastOneMsg = true
-        when DBG: dbg "processing msg=" & $msg
-        mp.pm(mp.cp, msg)
-        # Cannot assume msg is valid here
+        when DBG: dbg " deleted  idx=" & $idx
 
     if not processedAtLeastOneMsg:
       # No messages to process so wait
-      # TODO: A message may have arrived since we last checked
-      # and since we're not using a lock we don't know. One
-      # solution would be to have a timeout and POLL, YECK!
-      #
-      # Seems like we need an atomic event here associated with
-      # adding an element to an empty queue and removing the
-      # last element. But its tricky since the looper can be
-      # managing mutliple queues.
       ml.lock[].acquire
       while not ml.condBool[]:
-        when DBG: dbg "waiting"
+        when DBG: dbg " waiting"
         ml.cond[].wait(ml.lock[])
-        when DBG: dbg "done-waiting"
+        when DBG: dbg " done-waiting"
       ml.lock[].release
   when DBG: dbg "-"
 
@@ -108,7 +105,6 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
     proc dbg(s: string) = echo name & ".newMsgLooper:" & s
     dbg "+"
 
-
   # Use a global to coordinate initialization of the looper
   # We may want to make a MsgLooper an untracked structure
   # in the future.
@@ -118,14 +114,14 @@ proc newMsgLooper*(name: string): MsgLooperPtr =
     result.name = name
     result.initialized = false;
 
-    when DBG: dbg "Using createThread"
+    when DBG: dbg " Using createThread"
     result.thread = allocObject[TThread[MsgLooperPtr]]()
     createThread(result.thread[], looper, result)
 
     while (not result.initialized):
-      when DBG: dbg "waiting on gInitCond"
+      when DBG: dbg " waiting on gInitCond"
       gInitCond.wait(gInitLock)
-    when DBG: dbg "looper is initialized"
+    when DBG: dbg " looper is initialized"
   gInitLock.release()
 
   when DBG: dbg "-"
@@ -145,20 +141,6 @@ proc ping(ml: MsgLooperPtr) =
   ml.cond[].signal()
   ml.lock[].release()
 
-proc allocMsgProcessor(cp: ComponentPtr, mq: MsgQueuePtr,
-    pm: ProcessMsg): MsgProcessorPtr =
-  result = allocObject[MsgProcessor]()
-  result.cp = cp
-  result.mq = mq
-  result.pm = pm
-
-proc allocMsgProcessor(newComponent: NewComponent): MsgProcessorPtr =
-  result = allocObject[MsgProcessor]()
-  result.cp = nil
-  result.mq = nil
-  result.pm = nil
-  result.newComponent = newComponent
-
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
     cp: ComponentPtr) =
   ## Add the ProcessMsg funtion and its associated Queue to this looper.
@@ -170,27 +152,26 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
 
   # See if there is an empty slot
   var added = false
-  for idx in 0..ml.listMsgProcessorLen-1:
+  for idx in 0..listMsgProcessorMaxLen-1:
     var mp = ml.listMsgProcessor[idx]
-    if mp == nil:
-      var mp = allocMsgProcessor(cp, mq, pm)
-      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
+    var emptyState = empty
+    if atomicCompareExchangeN[MsgProcessorState](addr mp.state,
+        addr emptyState, busy, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+      if idx >= ml.listMsgProcessorLen:
+        ml.listMsgProcessorLen += 1
+      mp.cp = cp
+      mp.mq = mq
+      mp.pm = pm
+      mp.state = full
       ping(ml)
       added = true
 
   if not added:
-    # No empty slots try to append
-    if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-      var mp = allocMsgProcessor(cp, mq, pm)
-      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
-      ml.listMsgProcessorLen += 1
-      ping(ml)
-    else:
       doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
         "Attempted to add too many ProcessMsg, maximum is " &
         $listMsgProcessorMaxLen)
 
-  when DBG: dbg "- added a new entry"
+  when DBG: dbg "-"
 
 proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
   addProcessMsg(ml, pm, q, nil)
@@ -202,13 +183,11 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
     newComponent: NewComponent): ptr ComponentType =
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
-  ## in that thread allowing the component to be gcsafe and use the
-  ## threads heap.
+  ## in the context of its thread.
   ##
   ## TODO: This must block until newComponent completes!!!!
   ## What I'd like to do is send a message to looper with a
   ## rspq that this will wait on.
-  ##
   when DBG:
     proc dbg(s:string) = echo ml.name & ".addComponent:" & s
     dbg "+"
@@ -216,41 +195,56 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
 
   # See if there is an empty slot
   var added = false
-  for idx in 0..ml.listMsgProcessorLen-1:
-    var mp = ml.listMsgProcessor[idx]
-    if mp == nil:
-      when DBG: dbg "replacing old entry"
-      mp = allocMsgProcessor(newComponent)
-      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
-      ml.listMsgProcessorLen += 1
+  for idx in 0..listMsgProcessorMaxLen-1:
+    mp = ml.listMsgProcessor[idx]
+    var emptyState = empty
+    if atomicCompareExchangeN[MsgProcessorState](addr mp.state,
+        addr emptyState, busy, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+      if idx >= ml.listMsgProcessorLen:
+        when DBG:
+          dbg " idx=" & $idx & " ml.listMsgProcessorLen=" &
+            $ml.listMsgProcessorLen
+        ml.listMsgProcessorLen += 1
+      mp.newComponent = newComponent
+      mp.state = adding
       ping(ml)
       added = true
-  
+      break
+
   if not added:
-    # No empty slots try to append
-    if ml.listMsgProcessorLen < listMsgProcessorMaxLen:
-      when DBG: dbg "appending new entry"
-      mp = allocMsgProcessor(newComponent)
-      ml.listMsgProcessor[ml.listMsgProcessorLen] = mp
-      ml.listMsgProcessorLen += 1
-      ping(ml)
-    else:
       doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
         "Attempted to add too many ProcessMsg, maximum is " &
         $listMsgProcessorMaxLen)
 
   #ml.lock[].release()
   when DBG: dbg " sleeping.."
-  # TODO: This needs to be done correctly!!!!
+  # TODO: Must wait until done!!
   sleep(100)
   result = cast[ptr ComponentType](mp.cp)
   when DBG: dbg "-"
 
 proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
     delComponent: DelComponent) =
-  ## Delete a component
-  for idx in 0..ml.listMsgProcessorLen-1:
+  ## Delete a component. As with addComponent the delComponent
+  ## proc is called in the context of its thread.
+  ##
+  ## TODO: This must block until newComponent completes!!!!
+  ## What I'd like to do is send a message to looper with a
+  ## rspq that this will wait on.
+  when DBG:
+    proc dbg(s:string) = echo ml.name & ".delComponent:" & s
+    dbg "+"
+  for idx in 0..listMsgProcessorMaxLen-1:
     var mp = ml.listMsgProcessor[idx]
-    if mp != nil and mp.cp == cp:
-      mp.delComponent = delComponent
-      atomicStoreN(addr mp.mq, nil, ATOMIC_RELEASE)
+    if mp.state == full and mp.cp == cp:
+      var fullState = full
+      if atomicCompareExchangeN[MsgProcessorState](addr mp.state,
+          addr fullState, busy, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+        when DBG: dbg " deleting idx=" & $idx
+        mp.delComponent = delComponent
+        mp.state = deleting
+        ping(ml)
+        # TODO: Must wait until done!!
+        sleep(100)
+
+  when DBG: dbg "-"

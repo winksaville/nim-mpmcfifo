@@ -8,8 +8,12 @@ const
   listMsgProcessorMaxLen* = 10
 
 type
+  MsgProcessorState* = enum
+    empty, busy, adding, full, deleting
+
   MsgProcessorPtr* = ptr MsgProcessor
   MsgProcessor* = object
+    state*: MsgProcessorState
     pm*: ProcessMsg
     mq*: QueuePtr
     cp*: ComponentPtr

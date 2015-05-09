@@ -2,7 +2,7 @@
 ## a process to exeucte. This will evolve into a hierarchical
 ## state machine with enter and exit methods and problably
 ## using templates or macros to make it easy to use.
-import msg, msgarena, msglooper, mpscfifo, fifoutils, tables, typeinfo
+import msg, msgarena, msglooper, mpscfifo, fifoutils, tables, typeinfo, os
 
 type
   StateInfo[TypeState] = object of RootObj
@@ -28,9 +28,11 @@ proc newStateInfo[TypeState](sm: ref StateMachine[TypeState],
     parentStateInfo: ref StateInfo[TypeState]
 
   new(result)
-  if parent != nil and hasKey[TypeState, ref StateInfo[TypeState]](sm.states, parent):
+  if parent != nil and hasKey[TypeState, ref StateInfo[TypeState]](
+      sm.states, parent):
     echo "parent exists"
-    parentStateInfo = mget[TypeState, ref StateInfo[TypeState]](sm.states, parent)
+    parentStateInfo = mget[TypeState, ref StateInfo[TypeState]](
+      sm.states, parent)
   else:
     echo "parent not in table"
     parentStateInfo = nil
@@ -40,8 +42,8 @@ proc newStateInfo[TypeState](sm: ref StateMachine[TypeState],
 proc `$`*(si: ref StateInfo): string =
   result = "{state=" # & si.state
 
-#proc initStateMachine*[TypeStateMachine, TypeState](sm: ref StateMachine[TypeState],
-#    name: string) =
+#proc initStateMachine*[TypeStateMachine, TypeState](
+#    sm: ref StateMachine[TypeState], name: string) =
 #  ## Initialize StateMachine
 #  sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
 #  sm.name = name
@@ -52,8 +54,8 @@ proc `$`*(si: ref StateInfo): string =
 #  sm.curState = nil
 #  sm.ml.addProcessMsg(sm)
 
-proc initStateMachineX*[TypeStateMachine, TypeState](sm: ref StateMachine[TypeState],
-    name: string, ml: MsgLooperPtr) =
+proc initStateMachineX*[TypeStateMachine, TypeState](
+    sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
   ## Initialize StateMachine
   echo "initStateMacineX: e"
   sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
@@ -67,16 +69,17 @@ proc initStateMachineX*[TypeStateMachine, TypeState](sm: ref StateMachine[TypeSt
 
 proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
   ## deinitialize StateMachine
-  sm.ml.delMsgLooper()
   sm.rcvq.delMpscFifo()
   sm.ma.delMsgArena()
 
-proc startStateMachine*[TypeState](sm: ref StateMachine[TypeState], initialState: TypeState) =
+proc startStateMachine*[TypeState](sm: ref StateMachine[TypeState],
+    initialState: TypeState) =
   ## Start the state machine at initialState
   ## TODO: More to do when hierarchy is implemented
   sm.curState = initialState
 
-proc addState*[TypeState](sm: ref StateMachine[TypeState], state: TypeState, parent: TypeState = nil) =
+proc addState*[TypeState](sm: ref StateMachine[TypeState], state: TypeState,
+    parent: TypeState = nil) =
   ## Add a new state to the hierarchy. The parent argument may be nil
   ## if the state has no parent.
   if hasKey[TypeState, ref StateInfo[TypeState]](sm.states, state):
@@ -86,7 +89,8 @@ proc addState*[TypeState](sm: ref StateMachine[TypeState], state: TypeState, par
     var stateInfo = newStateInfo[TypeState](sm, state, parent)
     add[TypeState, ref StateInfo[TypeState]](sm.states, state, stateInfo)
 
-proc transitionTo*[TypeState](sm: ref StateMachine[TypeState], state: TypeState) =
+proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
+    state: TypeState) =
   ## Transition to a new state
   sm.curState = state
 
@@ -137,22 +141,27 @@ when isMainModule:
     #  initStateMachine[SmT1, SmT1State](result, "smt1")
 
     proc newSmT1X(ml: MsgLooperPtr): ptr Component =
-      echo "newSmT1X: e"
+      echo "newSmT1X:+"
       ## Create a new SmT1 state machine
       var
         smT1: ref SmT1
       new(smT1)
-      #smT1 = allocObject[SmT1]()
       initStateMachineX[SmT1, SmT1State](smT1, "smt1", ml)
+      smT1.count = 0
+      smT1.defaultCount = 0
+      smT1.s0Count = 0
+      smT1.s1Count = 0
 
       addState[SmT1State](smT1, default)
       startStateMachine[SmT1State](smT1, default)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
-      echo "newSmT1X: x"
+      echo "newSmT1X:-"
 
-    proc delSmT1(sm: ref SmT1) =
-      deinitStateMachine[SmT1State](sm)
+    proc delSmT1(cp: ptr Component) =
+      echo "delSmT1:+"
+      deinitStateMachine[SmT1State](cast[ref SmT1](cp))
+      echo "delSmT1:-"
 
     var
       smT1: ptr SmT1
@@ -160,37 +169,91 @@ when isMainModule:
       ma = newMsgArena()
       rcvq = newMpscFifo("rcvq", ma)
 
+    test "test-add-del-component":
+      echo "test-add-del-component"
+
+      proc checkSendingTwoMsgs(sm: ptr SmT1, ma: MsgArenaPtr,
+          rcvq: MsgQueuePtr) =
+        # Send first message, should be processed by default
+        var msg: MsgPtr
+        msg = ma.getMsg(rcvq, 1)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 1
+        check sm.count == 1
+        check sm.defaultCount == 1
+        check sm.s0Count == 0
+        check sm.s1Count == 0
+
+        # Send second message, should be processed by default
+        msg = ma.getMsg(rcvq, 2)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 2
+        check sm.count == 2
+        check sm.defaultCount == 2
+        check sm.s0Count == 0
+        check sm.s1Count == 0
+
+      var
+        ml = newMsgLooper("ml_smt1")
+
+      var sm1 = addComponent[SmT1](ml, newSmT1X)
+      checkSendingTwoMsgs(sm1, ma, rcvq)
+
+      var sm2 = addComponent[SmT1](ml, newSmT1X)
+      checkSendingTwoMsgs(sm2, ma, rcvq)
+
+      # delete the first one added
+      delComponent(ml, sm1, delSmT1)
+      # delete it again, be sure nothing blows up
+      delComponent(ml, sm1, delSmT1)
+      #sleep(100)
+      #
+      ## Add first one back, this will use the first slot
+      sm1 = addComponent[SmT1](ml, newSmT1X)
+      checkSendingTwoMsgs(sm1, ma, rcvq)
+
+      ## delete both
+      delComponent(ml, sm1, delSmT1)
+      delComponent(ml, sm2, delSmT1)
+
     # Tests default as the one and only state
     setup:
       var ml = newMsgLooper("ml_smt1")
       smT1 = addComponent[SmT1](ml, newSmT1X)
 
     teardown:
-      #delComponent[SmT1](ml, delSmT1)
+      #delComponent[SmT1](ml, smT1, delSmT1)
       smT1 = nil
 
     test "test-one-state":
       echo "test-one-state"
 
-      # Send first message, should be processed by default
-      msg = smT1.ma.getMsg(rcvq, 1)
-      smT1.rcvq.add(msg)
-      msg = rcvq.rmv()
-      check msg.cmd == 1
-      check smt1.count == 1
-      check smt1.defaultCount == 1
-      check smt1.s0Count == 0
-      check smt1.s1Count == 0
+      proc checkSendingTwoMsgs(sm: ptr SmT1, ma: MsgArenaPtr,
+          rcvq: MsgQueuePtr) =
+        # Send first message, should be processed by default
+        var msg: MsgPtr
+        msg = ma.getMsg(rcvq, 1)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 1
+        check sm.count == 1
+        check sm.defaultCount == 1
+        check sm.s0Count == 0
+        check sm.s1Count == 0
 
-      # Send second message, should be processed by default
-      msg = smT1.ma.getMsg(rcvq, 2)
-      smT1.rcvq.add(msg)
-      msg = rcvq.rmv()
-      check msg.cmd == 2
-      check smt1.count == 2
-      check smt1.defaultCount == 2
-      check smt1.s0Count == 0
-      check smt1.s1Count == 0
+        # Send second message, should be processed by default
+        msg = ma.getMsg(rcvq, 2)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 2
+        check sm.count == 2
+        check sm.defaultCount == 2
+        check sm.s0Count == 0
+        check sm.s1Count == 0
+
+      checkSendingTwoMsgs(smT1, ma, rcvq)
 
     ## Test with two states s0, s1
     #setup:
