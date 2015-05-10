@@ -184,7 +184,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
 proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
   addProcessMsg(ml, cp.pm, cp.rcvq, cp)
 
-proc addComponent*(ml: MsgLooperPtr,
+proc addComponent(ml: MsgLooperPtr,
     newComponent: NewComponent, rspq: MsgQueuePtr) =
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
@@ -232,7 +232,7 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
   ml.ma.retMsg(msg)
   result = cast[ptr ComponentType](msg.extra)
 
-proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
+proc delComponent(ml: MsgLooperPtr, cp: ComponentPtr,
     delComponent: DelComponent, rspq: MsgQueuePtr) =
   ## Delete a component. As with addComponent the delComponent
   ## proc is called in the context of its thread. When complete

@@ -157,7 +157,7 @@ when isMainModule:
       startStateMachine[SmT1State](smT1, default)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
-      echo "newSmT1X:-"
+      echo "newSmT1OneState:-"
 
     proc newSmT1TwoStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
@@ -167,7 +167,7 @@ when isMainModule:
       startStateMachine[SmT1State](smT1, s0)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
-      echo "newSmT1X:-"
+      echo "newSmT1TwoStates:-"
 
     proc newSmT1TriangleStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
@@ -178,7 +178,7 @@ when isMainModule:
       startStateMachine[SmT1State](smT1, s0)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
-      echo "newSmT1X:-"
+      echo "newSmT1TringleStates:-"
 
     proc delSmT1(cp: ptr Component) =
       echo "delSmT1:+"
@@ -234,12 +234,8 @@ when isMainModule:
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
       ## delete both
-      delComponent(ml, sm1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
-      delComponent(ml, sm2, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
+      delComponent(ml, sm1, delSmT1)
+      delComponent(ml, sm2, delSmT1)
 
     # Tests default as the one and only state
     setup:
