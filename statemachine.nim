@@ -42,19 +42,7 @@ proc newStateInfo[TypeState](sm: ref StateMachine[TypeState],
 proc `$`*(si: ref StateInfo): string =
   result = "{state=" # & si.state
 
-#proc initStateMachine*[TypeStateMachine, TypeState](
-#    sm: ref StateMachine[TypeState], name: string) =
-#  ## Initialize StateMachine
-#  sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
-#  sm.name = name
-#  sm.pm = dispatcher[TypeStateMachine]
-#  sm.ma = newMsgArena()
-#  sm.ml = newMsgLooper("ml_" & name)
-#  sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
-#  sm.curState = nil
-#  sm.ml.addProcessMsg(sm)
-
-proc initStateMachineX*[TypeStateMachine, TypeState](
+proc initStateMachine*[TypeStateMachine, TypeState](
     sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
   ## Initialize StateMachine
   echo "initStateMacineX: e"
@@ -135,16 +123,11 @@ when isMainModule:
       transitionTo[SmT1State](sm, s0)
       msg.rspq.add(msg)
 
-    #proc newSmT1(): ref SmT1 =
-    #  ## Create a new SmT1 state machine
-    #  result = allocObject[SmT1]()
-    #  initStateMachine[SmT1, SmT1State](result, "smt1")
-
     proc newSmT1NonState(ml: MsgLooperPtr): ref SmT1 =
       echo "initSmT1NonState:+"
       ## Create a new SmT1 state machine
       new(result)
-      initStateMachineX[SmT1, SmT1State](result, "smt1", ml)
+      initStateMachine[SmT1, SmT1State](result, "smt1", ml)
       result.count = 0
       result.defaultCount = 0
       result.s0Count = 0
