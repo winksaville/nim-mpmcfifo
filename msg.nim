@@ -22,6 +22,7 @@ type
     next*: MsgPtr
     rspq*: QueuePtr
     cmd*: int32
+    extra*: int
 
 proc `$`*(msg: MsgPtr): string =
   if msg == nil:

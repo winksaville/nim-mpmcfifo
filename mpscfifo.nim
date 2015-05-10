@@ -212,6 +212,7 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
       result.next = nil
       result.rspq = next.rspq
       result.cmd = next.cmd
+      result.extra = next.extra
 
       # We've got a node break out of the loop
       break
