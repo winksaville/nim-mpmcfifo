@@ -218,33 +218,19 @@ when isMainModule:
         check sm.s0Count == 0
         check sm.s1Count == 0
 
-      addComponent[SmT1](ml, newSmT1OneState, rcvq)
-      msg = rcvq.rmv()
-      var sm1 = cast[ptr SmT1](msg.extra)
-      check(msg.cmd == 1)
+      var sm1 = addComponent[SmT1](ml, newSmT1OneState)
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
-      addComponent[SmT1](ml, newSmT1OneState, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
-      var sm2 = cast[ptr SmT1](msg.extra)
+      var sm2 = addComponent[SmT1](ml, newSmT1OneState)
       checkSendingTwoMsgs(sm2, ma, rcvq)
 
       # delete the first one added
-      delComponent(ml, sm1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
+      delComponent(ml, sm1, delSmT1)
       # delete it again, be sure nothing blows up
-      delComponent(ml, sm1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
-      #sleep(100)
-      #
+      delComponent(ml, sm1, delSmT1)
+
       ## Add first one back, this will use the first slot
-      addComponent[SmT1](ml, newSmT1OneState, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
-      sm1 = cast[ptr SmT1](msg.extra)
+      sm1 = addComponent[SmT1](ml, newSmT1OneState)
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
       ## delete both
@@ -257,15 +243,10 @@ when isMainModule:
 
     # Tests default as the one and only state
     setup:
-      addComponent[SmT1](ml, newSmT1OneState, rcvq)
-      msg = rcvq.rmv()
-      smT1 = cast[ptr SmT1](msg.extra)
-      check(msg.cmd == 1)
+      smT1 = addComponent[SmT1](ml, newSmT1OneState)
 
     teardown:
-      delComponent(ml, smT1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
+      delComponent(ml, smT1, delSmT1)
       smT1 = nil
 
     test "test-one-state":
@@ -298,15 +279,10 @@ when isMainModule:
 
     ## Test with two states s0, s1
     setup:
-      addComponent[SmT1](ml, newSmT1TwoStates, rcvq)
-      msg = rcvq.rmv()
-      smT1 = cast[ptr SmT1](msg.extra)
-      check(msg.cmd == 1)
+      smT1 = addComponent[SmT1](ml, newSmT1TwoStates)
 
     teardown:
-      delComponent(ml, smT1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
+      delComponent(ml, smT1, delSmT1)
       smT1 = nil
 
     test "test-two-states":
@@ -338,15 +314,10 @@ when isMainModule:
     # TODO: Add passing of unhandled message and verify
     # TODO: that default is invoked
     setup:
-      addComponent[SmT1](ml, newSmT1TriangleStates, rcvq)
-      msg = rcvq.rmv()
-      smT1 = cast[ptr SmT1](msg.extra)
-      check(msg.cmd == 1)
+      smT1 = addComponent[SmT1](ml, newSmT1TriangleStates)
 
     teardown:
-      delComponent(ml, smT1, delSmT1, rcvq)
-      msg = rcvq.rmv()
-      check(msg.cmd == 1)
+      delComponent(ml, smT1, delSmT1)
       smT1 = nil
 
     test "test-trinagle-states":

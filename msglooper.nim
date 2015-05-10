@@ -184,15 +184,12 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr) =
 proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
   addProcessMsg(ml, cp.pm, cp.rcvq, cp)
 
-proc addComponent*[ComponentType](ml: MsgLooperPtr,
+proc addComponent*(ml: MsgLooperPtr,
     newComponent: NewComponent, rspq: MsgQueuePtr) =
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
-  ## in the context of its thread.
-  ##
-  ## TODO: This must block until newComponent completes!!!!
-  ## What I'd like to do is send a message to looper with a
-  ## rspq that this will wait on.
+  ## in the context of its thread. When operation is complete
+  ## a message is sent to rspq
   when DBG:
     proc dbg(s:string) = echo ml.name & ".addComponent:" & s
     dbg "+"
@@ -224,14 +221,22 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
 
   when DBG: dbg "-"
 
+proc addComponent*[ComponentType](ml: MsgLooperPtr,
+    newComp: NewComponent): ptr ComponentType =
+  ## Add a component to this looper. The newComponent proc is called
+  ## from within the looper thread and thus all allocation is done
+  ## in the context of its thread.
+  var rspq = newMpscFifo("", ml.ma, ml)
+  addComponent(ml, newComp, rspq)
+  var msg = rspq.rmv()
+  ml.ma.retMsg(msg)
+  result = cast[ptr ComponentType](msg.extra)
+
 proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
     delComponent: DelComponent, rspq: MsgQueuePtr) =
   ## Delete a component. As with addComponent the delComponent
-  ## proc is called in the context of its thread.
-  ##
-  ## TODO: This must block until newComponent completes!!!!
-  ## What I'd like to do is send a message to looper with a
-  ## rspq that this will wait on.
+  ## proc is called in the context of its thread. When complete
+  ## a message is sent to rspq.
   when DBG:
     proc dbg(s:string) = echo ml.name & ".delComponent:" & s
     dbg "+"
@@ -253,3 +258,11 @@ proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
   if not deletn:
     rspq.add(ml.ma.getMsg(1))
   when DBG: dbg "-"
+
+proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr, delComp: DelComponent) =
+  ## Delete a component. As with addComponent the delComponent
+  ## proc is called in the context of its thread.
+  var rspq = newMpscFifo("", ml.ma, ml)
+  delComponent(ml, cp, delComp, rspq)
+  var msg = rspq.rmv()
+  ml.ma.retMsg(msg)
