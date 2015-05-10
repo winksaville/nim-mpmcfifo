@@ -226,7 +226,7 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
   ## in the context of its thread.
-  var rspq = newMpscFifo("", ml.ma, ml)
+  var rspq = newMpscFifo("", ml.ma)
   addComponent(ml, newComp, rspq)
   var msg = rspq.rmv()
   ml.ma.retMsg(msg)
@@ -262,7 +262,7 @@ proc delComponent(ml: MsgLooperPtr, cp: ComponentPtr,
 proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr, delComp: DelComponent) =
   ## Delete a component. As with addComponent the delComponent
   ## proc is called in the context of its thread.
-  var rspq = newMpscFifo("", ml.ma, ml)
+  var rspq = newMpscFifo("", ml.ma)
   delComponent(ml, cp, delComp, rspq)
   var msg = rspq.rmv()
   ml.ma.retMsg(msg)
