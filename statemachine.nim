@@ -65,7 +65,7 @@ proc initStateMachineX*[TypeStateMachine, TypeState](
   sm.ml = ml
   sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
   sm.curState = nil
-  echo "initStateMacineX: x sm.ma=", sm.ma
+  echo "initStateMacineX: x"
 
 proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
   ## deinitialize StateMachine
@@ -198,30 +198,51 @@ when isMainModule:
       var
         ml = newMsgLooper("ml_smt1")
 
-      var sm1 = addComponent[SmT1](ml, newSmT1X)
+      addComponent[SmT1](ml, newSmT1X, rcvq)
+      msg = rcvq.rmv()
+      var sm1 = cast[ptr SmT1](msg.extra)
+      check(msg.cmd == 1)
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
-      var sm2 = addComponent[SmT1](ml, newSmT1X)
+      addComponent[SmT1](ml, newSmT1X, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
+      var sm2 = cast[ptr SmT1](msg.extra)
       checkSendingTwoMsgs(sm2, ma, rcvq)
 
       # delete the first one added
-      delComponent(ml, sm1, delSmT1)
+      delComponent(ml, sm1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
       # delete it again, be sure nothing blows up
-      delComponent(ml, sm1, delSmT1)
+      delComponent(ml, sm1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
       #sleep(100)
       #
       ## Add first one back, this will use the first slot
-      sm1 = addComponent[SmT1](ml, newSmT1X)
+      addComponent[SmT1](ml, newSmT1X, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
+      sm1 = cast[ptr SmT1](msg.extra)
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
       ## delete both
-      delComponent(ml, sm1, delSmT1)
-      delComponent(ml, sm2, delSmT1)
+      delComponent(ml, sm1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
+      delComponent(ml, sm2, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
 
     # Tests default as the one and only state
     setup:
       var ml = newMsgLooper("ml_smt1")
-      smT1 = addComponent[SmT1](ml, newSmT1X)
+      var smT1: ptr SmT1
+      addComponent[SmT1](ml, newSmT1X, rcvq)
+      msg = rcvq.rmv()
+      smT1 = cast[ptr SmT1](msg.extra)
+      check(msg.cmd == 1)
 
     teardown:
       #delComponent[SmT1](ml, smT1, delSmT1)

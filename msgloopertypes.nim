@@ -2,7 +2,7 @@
 ##
 ## This was needed because there is a circular relationship
 ## between mpscfifo and msglooper.
-import msg, locks
+import msg, msgarena, locks
 
 const
   listMsgProcessorMaxLen* = 10
@@ -17,6 +17,7 @@ type
     pm*: ProcessMsg
     mq*: QueuePtr
     cp*: ComponentPtr
+    rspq*: QueuePtr
     newComponent*: NewComponent
     delComponent*: DelComponent
 
@@ -31,6 +32,7 @@ type
     condBool* : ptr bool
     cond*: ptr TCond
     lock*: ptr TLock
+    ma*: MsgArenaPtr
     listMsgProcessorLen*: int
     listMsgProcessor*: ptr array[0..listMsgProcessorMaxLen-1,
         MsgProcessorPtr]

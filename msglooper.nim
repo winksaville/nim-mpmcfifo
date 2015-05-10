@@ -1,5 +1,5 @@
 import os, locks
-import msg, mpscfifo, msgarena, fifoutils
+import msg, mpscfifo, msgarena, fifoutils, strutils
 
 import msgloopertypes
 export msgloopertypes
@@ -39,6 +39,7 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
     ml.cond[].initCond()
     ml.lock = allocObject[TLock]()
     ml.lock[].initLock()
+    ml.ma = newMsgArena()
     when DBG: dbg "signal gInitCond"
     ml.initialized = true;
     gInitCond.signal()
@@ -69,6 +70,9 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
         mp.mq = cp.rcvq
         mp.pm = cp.pm
         mp.state = full
+        var msg = ml.ma.getMsg(1)
+        msg.extra = cast[int](mp.cp)
+        mp.rspq.add(msg)
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
         when DBG: dbg " added  idx=" & $idx
       of full:
@@ -84,6 +88,7 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
         when DBG: dbg " deleting idx=" & $idx
         mp.delComponent(mp.cp)
         mp.state = empty
+        mp.rspq.add(ml.ma.getMsg(1))
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
         when DBG: dbg " deleted  idx=" & $idx
 
@@ -180,7 +185,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, cp: ComponentPtr) =
   addProcessMsg(ml, cp.pm, cp.rcvq, cp)
 
 proc addComponent*[ComponentType](ml: MsgLooperPtr,
-    newComponent: NewComponent): ptr ComponentType =
+    newComponent: NewComponent, rspq: MsgQueuePtr) =
   ## Add a component to this looper. The newComponent proc is called
   ## from within the looper thread and thus all allocation is done
   ## in the context of its thread.
@@ -206,6 +211,7 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
             $ml.listMsgProcessorLen
         ml.listMsgProcessorLen += 1
       mp.newComponent = newComponent
+      mp.rspq = rspq
       mp.state = adding
       ping(ml)
       added = true
@@ -216,15 +222,10 @@ proc addComponent*[ComponentType](ml: MsgLooperPtr,
         "Attempted to add too many ProcessMsg, maximum is " &
         $listMsgProcessorMaxLen)
 
-  #ml.lock[].release()
-  when DBG: dbg " sleeping.."
-  # TODO: Must wait until done!!
-  sleep(100)
-  result = cast[ptr ComponentType](mp.cp)
   when DBG: dbg "-"
 
 proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
-    delComponent: DelComponent) =
+    delComponent: DelComponent, rspq: MsgQueuePtr) =
   ## Delete a component. As with addComponent the delComponent
   ## proc is called in the context of its thread.
   ##
@@ -234,6 +235,7 @@ proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
   when DBG:
     proc dbg(s:string) = echo ml.name & ".delComponent:" & s
     dbg "+"
+  var deletn = false
   for idx in 0..listMsgProcessorMaxLen-1:
     var mp = ml.listMsgProcessor[idx]
     if mp.state == full and mp.cp == cp:
@@ -243,8 +245,11 @@ proc delComponent*(ml: MsgLooperPtr, cp: ComponentPtr,
         when DBG: dbg " deleting idx=" & $idx
         mp.delComponent = delComponent
         mp.state = deleting
+        mp.rspq = rspq
         ping(ml)
-        # TODO: Must wait until done!!
-        sleep(100)
+        deletn = true
+        break
 
+  if not deletn:
+    rspq.add(ml.ma.getMsg(1))
   when DBG: dbg "-"
