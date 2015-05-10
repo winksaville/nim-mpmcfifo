@@ -140,20 +140,42 @@ when isMainModule:
     #  result = allocObject[SmT1]()
     #  initStateMachine[SmT1, SmT1State](result, "smt1")
 
-    proc newSmT1X(ml: MsgLooperPtr): ptr Component =
-      echo "newSmT1X:+"
+    proc newSmT1NonState(ml: MsgLooperPtr): ref SmT1 =
+      echo "initSmT1NonState:+"
       ## Create a new SmT1 state machine
-      var
-        smT1: ref SmT1
-      new(smT1)
-      initStateMachineX[SmT1, SmT1State](smT1, "smt1", ml)
-      smT1.count = 0
-      smT1.defaultCount = 0
-      smT1.s0Count = 0
-      smT1.s1Count = 0
+      new(result)
+      initStateMachineX[SmT1, SmT1State](result, "smt1", ml)
+      result.count = 0
+      result.defaultCount = 0
+      result.s0Count = 0
+      result.s1Count = 0
+
+    proc newSmT1OneState(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
 
       addState[SmT1State](smT1, default)
       startStateMachine[SmT1State](smT1, default)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1X:-"
+
+    proc newSmT1TwoStates(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addState[SmT1State](smT1, s0)
+      addState[SmT1State](smT1, s1)
+      startStateMachine[SmT1State](smT1, s0)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1X:-"
+
+    proc newSmT1TriangleStates(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addState[SmT1State](smT1, default)
+      addState[SmT1State](smT1, s0, default)
+      addState[SmT1State](smT1, s1, default)
+      startStateMachine[SmT1State](smT1, s0)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1X:-"
@@ -168,6 +190,7 @@ when isMainModule:
       msg: MsgPtr
       ma = newMsgArena()
       rcvq = newMpscFifo("rcvq", ma)
+      ml = newMsgLooper("ml_smt1")
 
     test "test-add-del-component":
       echo "test-add-del-component"
@@ -195,16 +218,13 @@ when isMainModule:
         check sm.s0Count == 0
         check sm.s1Count == 0
 
-      var
-        ml = newMsgLooper("ml_smt1")
-
-      addComponent[SmT1](ml, newSmT1X, rcvq)
+      addComponent[SmT1](ml, newSmT1OneState, rcvq)
       msg = rcvq.rmv()
       var sm1 = cast[ptr SmT1](msg.extra)
       check(msg.cmd == 1)
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
-      addComponent[SmT1](ml, newSmT1X, rcvq)
+      addComponent[SmT1](ml, newSmT1OneState, rcvq)
       msg = rcvq.rmv()
       check(msg.cmd == 1)
       var sm2 = cast[ptr SmT1](msg.extra)
@@ -221,7 +241,7 @@ when isMainModule:
       #sleep(100)
       #
       ## Add first one back, this will use the first slot
-      addComponent[SmT1](ml, newSmT1X, rcvq)
+      addComponent[SmT1](ml, newSmT1OneState, rcvq)
       msg = rcvq.rmv()
       check(msg.cmd == 1)
       sm1 = cast[ptr SmT1](msg.extra)
@@ -237,15 +257,15 @@ when isMainModule:
 
     # Tests default as the one and only state
     setup:
-      var ml = newMsgLooper("ml_smt1")
-      var smT1: ptr SmT1
-      addComponent[SmT1](ml, newSmT1X, rcvq)
+      addComponent[SmT1](ml, newSmT1OneState, rcvq)
       msg = rcvq.rmv()
       smT1 = cast[ptr SmT1](msg.extra)
       check(msg.cmd == 1)
 
     teardown:
-      #delComponent[SmT1](ml, smT1, delSmT1)
+      delComponent(ml, smT1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
       smT1 = nil
 
     test "test-one-state":
@@ -277,76 +297,79 @@ when isMainModule:
       checkSendingTwoMsgs(smT1, ma, rcvq)
 
     ## Test with two states s0, s1
-    #setup:
-    #  smT1 = newSmT1()
-    #  addState[SmT1State](smT1, s0)
-    #  addState[SmT1State](smT1, s1)
-    #  startStateMachine[SmT1State](smT1, s0)
+    setup:
+      addComponent[SmT1](ml, newSmT1TwoStates, rcvq)
+      msg = rcvq.rmv()
+      smT1 = cast[ptr SmT1](msg.extra)
+      check(msg.cmd == 1)
 
-    #teardown:
-    #  smT1.delSmt1()
+    teardown:
+      delComponent(ml, smT1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
+      smT1 = nil
 
-    #test "test-two-states":
-    #  var
-    #    rcvq = newMpscFifo("rcvq", smT1.ma)
-    #    msg: MsgPtr
+    test "test-two-states":
+      var
+        rcvq = newMpscFifo("rcvq", smT1.ma)
+        msg: MsgPtr
 
-    #  # Send first message, should be processed by S0
-    #  msg = smT1.ma.getMsg(rcvq, 1)
-    #  smT1.rcvq.add(msg)
-    #  msg = rcvq.rmv()
-    #  check msg.cmd == 1
-    #  check smt1.count == 1
-    #  check smt1.defaultCount == 0
-    #  check smt1.s0Count == 1
-    #  check smt1.s1Count == 0
+      # Send first message, should be processed by S0
+      msg = smT1.ma.getMsg(rcvq, 1)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 1
+      check smt1.count == 1
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 0
 
-    #  # Send second message, should be processed by S1
-    #  msg = smT1.ma.getMsg(rcvq, 2)
-    #  smT1.rcvq.add(msg)
-    #  msg = rcvq.rmv()
-    #  check msg.cmd == 2
-    #  check smt1.count == 2
-    #  check smt1.defaultCount == 0
-    #  check smt1.s0Count == 1
-    #  check smt1.s1Count == 1
+      # Send second message, should be processed by S1
+      msg = smT1.ma.getMsg(rcvq, 2)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 2
+      check smt1.count == 2
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 1
 
-    ## Test with default and two child states s0, s1
-    ## TODO: Add passing of unhandled message and verify
-    ## TODO: that default is invoked
-    #setup:
-    #  smT1 = newSmT1()
-    #  addState[SmT1State](smT1, default)
-    #  addState[SmT1State](smT1, s0, default)
-    #  addState[SmT1State](smT1, s1, default)
-    #  addState[SmT1State](smT1, s1, default)
+    # Test with default and two child states s0, s1 in a triangle
+    # TODO: Add passing of unhandled message and verify
+    # TODO: that default is invoked
+    setup:
+      addComponent[SmT1](ml, newSmT1TriangleStates, rcvq)
+      msg = rcvq.rmv()
+      smT1 = cast[ptr SmT1](msg.extra)
+      check(msg.cmd == 1)
 
-    #  startStateMachine[SmT1State](smT1, s0)
+    teardown:
+      delComponent(ml, smT1, delSmT1, rcvq)
+      msg = rcvq.rmv()
+      check(msg.cmd == 1)
+      smT1 = nil
 
-    #teardown:
-    #  smT1.delSmt1()
+    test "test-trinagle-states":
+      var
+        rcvq = newMpscFifo("rcvq", smT1.ma)
+        msg: MsgPtr
 
-    #test "test-default-and-two-child-states":
-    #  var
-    #    rcvq = newMpscFifo("rcvq", smT1.ma)
-    #    msg: MsgPtr
+      # Send first message, should be processed by S0
+      msg = smT1.ma.getMsg(rcvq, 1)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 1
+      check smt1.count == 1
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 0
 
-    #  # Send first message, should be processed by S0
-    #  msg = smT1.ma.getMsg(rcvq, 1)
-    #  smT1.rcvq.add(msg)
-    #  msg = rcvq.rmv()
-    #  check msg.cmd == 1
-    #  check smt1.count == 1
-    #  check smt1.defaultCount == 0
-    #  check smt1.s0Count == 1
-    #  check smt1.s1Count == 0
-
-    #  # Send second message, should be processed by S1
-    #  msg = smT1.ma.getMsg(rcvq, 2)
-    #  smT1.rcvq.add(msg)
-    #  msg = rcvq.rmv()
-    #  check msg.cmd == 2
-    #  check smt1.count == 2
-    #  check smt1.defaultCount == 0
-    #  check smt1.s0Count == 1
-    #  check smt1.s1Count == 1
+      # Send second message, should be processed by S1
+      msg = smT1.ma.getMsg(rcvq, 2)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 2
+      check smt1.count == 2
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 1
