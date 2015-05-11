@@ -1,12 +1,13 @@
-## A state machine where the current state is defined as
-## a process to exeucte. This will evolve into a hierarchical
-## state machine with enter and exit methods and problably
-## using templates or macros to make it easy to use.
+## A hierarchical state machine where the current state is defined as
+## a process to execute and the states may be arranged in a hierarchy.
+##
+## TODO: Add tests specfically transitions up and down the hierarchy.
+## TODO: Add support for deferred messages.
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 import tables, typeinfo, os, sequtils
 
 const
-  DBG = true
+  DBG = false
 
 type
   StateInfo[TypeState] = object of RootObj
