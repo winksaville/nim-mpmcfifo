@@ -6,12 +6,17 @@ import msg, msgarena, msglooper, mpscfifo, fifoutils, tables, typeinfo, os
 
 type
   StateInfo[TypeState] = object of RootObj
+    name: string
+    enter: TypeState
+    exit: TypeState
     state: TypeState
     parentStateInfo: ref StateInfo[TypeState]
 
   StateMachine*[TypeState] = object of Component
     protocols*: seq[int]
     curState*: TypeState
+    stateStack: seq[ref StateInfo[TypeState]]
+    tempStack: seq[ref StateInfo[TypeState]]
     ma*: MsgArenaPtr
     ml*: MsgLooperPtr
     states: TableRef[TypeState, ref StateInfo[TypeState]]
@@ -21,26 +26,28 @@ proc dispatcher[TypeStateMachine](cp: ComponentPtr, msg: MsgPtr) =
   ## dispatcher cast cp to a TypeStateMachine and call current state
   var sm = cast[ref TypeStateMachine](cp)
   sm.curState(sm, msg)
+  sm.performTransitions(msg)
 
-proc newStateInfo[TypeState](sm: ref StateMachine[TypeState],
-    state: TypeState, parent: TypeState): ref StateInfo[TypeState] =
+proc newStateInfo[TypeState](sm: ref StateMachine[TypeState], name: string,
+    state: TypeState, enter: TypeState, exit: TypeState, parent: TypeState):
+      ref StateInfo[TypeState] =
   var
     parentStateInfo: ref StateInfo[TypeState]
 
   new(result)
   if parent != nil and hasKey[TypeState, ref StateInfo[TypeState]](
       sm.states, parent):
-    echo "parent exists"
     parentStateInfo = mget[TypeState, ref StateInfo[TypeState]](
       sm.states, parent)
+    echo "parent=", parentStateInfo.name
   else:
     echo "parent not in table"
     parentStateInfo = nil
+  result.name = name
+  result.enter = enter
+  result.exit = exit
   result.state = state
   result.parentStateInfo = parentStateInfo
-
-proc `$`*(si: ref StateInfo): string =
-  result = "{state=" # & si.state
 
 proc initStateMachine*[TypeStateMachine, TypeState](
     sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
@@ -53,6 +60,8 @@ proc initStateMachine*[TypeStateMachine, TypeState](
   sm.ml = ml
   sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
   sm.curState = nil
+  sm.stateStack = @[]
+  sm.tempStack = @[]
   echo "initStateMacineX: x"
 
 proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
@@ -60,22 +69,68 @@ proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
   sm.rcvq.delMpscFifo()
   sm.ma.delMsgArena()
 
-proc startStateMachine*[TypeState](sm: ref StateMachine[TypeState],
+proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
+    int =
+  ## Move the contents of the temporary stack to the state stack
+  ## reversion the order of the items which are on the temporary
+  ## stack.
+  ##
+  ## result is the index into sm.stateStack where entering needs to start
+  result = sm.stateStack.high + 1
+  for i in countdown(sm.tempStack.high, 0):
+    var curSi = sm.tempStack[i]
+    sm.stateStack.add(sm.tempStack[i])
+
+proc performTransitions[TypeStateMachine](sm: ref TypeStateMachine,
+    msg: MsgPtr) =
+  ## TODO: Preform transitions
+
+proc invokeEnterProcs[TypeStateMachine](sm: ref TypeStateMachine,
+    stateStackEnteringIndex: int) =
+  for i in countup(stateStackEnteringIndex, sm.stateStack.high):
+    var enter = sm.stateStack[i].enter
+    if enter != nil:
+      enter(sm, nil)
+
+proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
     initialState: TypeState) =
   ## Start the state machine at initialState
-  ## TODO: More to do when hierarchy is implemented
   sm.curState = initialState
 
-proc addState*[TypeState](sm: ref StateMachine[TypeState], state: TypeState,
-    parent: TypeState = nil) =
+  # Push onto the tempStack current and all its parents.
+  var  curSi = mget[TypeState, ref StateInfo[TypeState]](
+        sm.states, sm.curState)
+  while curSi != nil:
+    sm.tempStack.add(curSi)
+    curSi = curSi.parentStateInfo
+
+  # Start with empty stack
+  sm.stateStack.setLen(0)
+  invokeEnterProcs[TypeStateMachine](sm, moveTempStackToStateStack(sm))
+
+proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
+    state: TypeState, enter: TypeState, exit: TypeState,
+    parent: TypeState) =
   ## Add a new state to the hierarchy. The parent argument may be nil
   ## if the state has no parent.
   if hasKey[TypeState, ref StateInfo[TypeState]](sm.states, state):
-    echo "addState: state already added"
+    doAssert(false, "state already added: " & name)
   else:
-    echo "addState: adding state"
-    var stateInfo = newStateInfo[TypeState](sm, state, parent)
+    var stateInfo = newStateInfo[TypeState](sm, name, state, enter, exit, parent)
+    echo "addState: state=", stateInfo.name
+    var parentName: string
+    if stateInfo.parentStateInfo != nil:
+      parentName = stateInfo.parentStateInfo.name
+    else:
+      parentName = "<nil>"
+    echo "addState: parent=", parentName
     add[TypeState, ref StateInfo[TypeState]](sm.states, state, stateInfo)
+
+proc addState*[TypeState](sm: ref StateMachine[TypeState], name: string,
+    state: TypeState) =
+  ## Add a new state to the hierarchy. The parent argument may be nil
+  ## if the state has no parent.
+  addStateEXP[TypeState](sm, name, state, nil, nil, nil)
 
 proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
     state: TypeState) =
@@ -100,6 +155,10 @@ when isMainModule:
     proc s1(sm: ref SmT1, msg: MsgPtr)
     proc s0(sm: ref SmT1, msg: MsgPtr)
 
+    proc defaultEnter(sm: ref SmT1, msg: MsgPtr) =
+      echo "defaultEnter"
+    proc defaultExit(sm: ref SmT1, msg: MsgPtr) =
+      echo "defaultExit"
     proc default(sm: ref SmT1, msg: MsgPtr) =
       ## default state no transition increments counters
       sm.count += 1
@@ -107,6 +166,10 @@ when isMainModule:
       echo "default: count=", sm.count
       msg.rspq.add(msg)
 
+    proc s0Enter(sm: ref SmT1, msg: MsgPtr) =
+      echo "s0Enter"
+    proc s0Exit(sm: ref SmT1, msg: MsgPtr) =
+      echo "s0Exit"
     proc s0(sm: ref SmT1, msg: MsgPtr) =
       ## S0 state transitions to S1 increments counter
       sm.count += 1
@@ -115,6 +178,10 @@ when isMainModule:
       transitionTo[SmT1State](sm, s1)
       msg.rspq.add(msg)
 
+    proc s1Enter(sm: ref SmT1, msg: MsgPtr) =
+      echo "s1Enter"
+    proc s1Exit(sm: ref SmT1, msg: MsgPtr) =
+      echo "s1Exit"
     proc s1(sm: ref SmT1, msg: MsgPtr) =
       ## S1 state transitions to S0 and increments counter
       sm.count += 1
@@ -136,8 +203,8 @@ when isMainModule:
     proc newSmT1OneState(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
 
-      addState[SmT1State](smT1, default)
-      startStateMachine[SmT1State](smT1, default)
+      addState[SmT1State](smT1, "default", default)
+      startStateMachine[SmT1, SmT1State](smT1, default)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1OneState:-"
@@ -145,9 +212,9 @@ when isMainModule:
     proc newSmT1TwoStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
 
-      addState[SmT1State](smT1, s0)
-      addState[SmT1State](smT1, s1)
-      startStateMachine[SmT1State](smT1, s0)
+      addState[SmT1State](smT1, "s0", s0)
+      addState[SmT1State](smT1, "s1", s1)
+      startStateMachine[SmT1, SmT1State](smT1, s0)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1TwoStates:-"
@@ -155,10 +222,10 @@ when isMainModule:
     proc newSmT1TriangleStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
 
-      addState[SmT1State](smT1, default)
-      addState[SmT1State](smT1, s0, default)
-      addState[SmT1State](smT1, s1, default)
-      startStateMachine[SmT1State](smT1, s0)
+      addStateEXP[SmT1State](smT1, "default", default, defaultEnter, defaultExit, nil)
+      addStateEXP[SmT1State](smT1, "s0", s0, s0Enter, s0Exit, default)
+      addStateEXP[SmT1State](smT1, "s1", s1, s1Enter, s1Exit, default)
+      startStateMachine[SmT1, SmT1State](smT1, s0)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1TringleStates:-"
@@ -254,9 +321,12 @@ when isMainModule:
         check sm.s0Count == 0
         check sm.s1Count == 0
 
+      check smT1.stateStack.low == 0
+      check smT1.stateStack.high == 0
+      check smT1.stateStack[0].name == "default"
       checkSendingTwoMsgs(smT1, ma, rcvq)
 
-    ## Test with two states s0, s1
+    # Test with two states s0, s1
     setup:
       smT1 = addComponent[SmT1](ml, newSmT1TwoStates)
 
@@ -268,6 +338,10 @@ when isMainModule:
       var
         rcvq = newMpscFifo("rcvq", smT1.ma)
         msg: MsgPtr
+
+      check smT1.stateStack.low == 0
+      check smT1.stateStack.high == 0
+      check smT1.stateStack[0].name == "s0"
 
       # Send first message, should be processed by S0
       msg = smT1.ma.getMsg(rcvq, 1)
@@ -303,6 +377,11 @@ when isMainModule:
       var
         rcvq = newMpscFifo("rcvq", smT1.ma)
         msg: MsgPtr
+
+      check smT1.stateStack.low == 0
+      check smT1.stateStack.high == 1
+      check smT1.stateStack[0].name == "default"
+      check smT1.stateStack[1].name == "s0"
 
       # Send first message, should be processed by S0
       msg = smT1.ma.getMsg(rcvq, 1)
