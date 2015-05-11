@@ -2,11 +2,16 @@
 ## a process to exeucte. This will evolve into a hierarchical
 ## state machine with enter and exit methods and problably
 ## using templates or macros to make it easy to use.
-import msg, msgarena, msglooper, mpscfifo, fifoutils, tables, typeinfo, os
+import msg, msgarena, msglooper, mpscfifo, fifoutils
+import tables, typeinfo, os, sequtils
+
+const
+  DBG = true
 
 type
   StateInfo[TypeState] = object of RootObj
     name: string
+    active: bool
     enter: TypeState
     exit: TypeState
     state: TypeState
@@ -15,18 +20,13 @@ type
   StateMachine*[TypeState] = object of Component
     protocols*: seq[int]
     curState*: TypeState
+    dstState*: TypeState
     stateStack: seq[ref StateInfo[TypeState]]
     tempStack: seq[ref StateInfo[TypeState]]
     ma*: MsgArenaPtr
     ml*: MsgLooperPtr
     states: TableRef[TypeState, ref StateInfo[TypeState]]
 
-
-proc dispatcher[TypeStateMachine](cp: ComponentPtr, msg: MsgPtr) =
-  ## dispatcher cast cp to a TypeStateMachine and call current state
-  var sm = cast[ref TypeStateMachine](cp)
-  sm.curState(sm, msg)
-  sm.performTransitions(msg)
 
 proc newStateInfo[TypeState](sm: ref StateMachine[TypeState], name: string,
     state: TypeState, enter: TypeState, exit: TypeState, parent: TypeState):
@@ -39,40 +39,21 @@ proc newStateInfo[TypeState](sm: ref StateMachine[TypeState], name: string,
       sm.states, parent):
     parentStateInfo = mget[TypeState, ref StateInfo[TypeState]](
       sm.states, parent)
-    echo "parent=", parentStateInfo.name
+    when DBG: echo "parent=", parentStateInfo.name
   else:
-    echo "parent not in table"
+    when DBG: echo "parent not in table"
     parentStateInfo = nil
   result.name = name
+  result.active = false
   result.enter = enter
   result.exit = exit
   result.state = state
   result.parentStateInfo = parentStateInfo
 
-proc initStateMachine*[TypeStateMachine, TypeState](
-    sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
-  ## Initialize StateMachine
-  echo "initStateMacineX: e"
-  sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
-  sm.name = name
-  sm.pm = dispatcher[TypeStateMachine]
-  sm.ma = newMsgArena()
-  sm.ml = ml
-  sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
-  sm.curState = nil
-  sm.stateStack = @[]
-  sm.tempStack = @[]
-  echo "initStateMacineX: x"
-
-proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
-  ## deinitialize StateMachine
-  sm.rcvq.delMpscFifo()
-  sm.ma.delMsgArena()
-
 proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
     int =
   ## Move the contents of the temporary stack to the state stack
-  ## reversion the order of the items which are on the temporary
+  ## reversing the order of the items which are on the temporary
   ## stack.
   ##
   ## result is the index into sm.stateStack where entering needs to start
@@ -81,16 +62,94 @@ proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
     var curSi = sm.tempStack[i]
     sm.stateStack.add(sm.tempStack[i])
 
-proc performTransitions[TypeStateMachine](sm: ref TypeStateMachine,
-    msg: MsgPtr) =
-  ## TODO: Preform transitions
+proc setupTempStackWithStatesToEnter[TypeStateMachine, TypeState](
+    sm: ref TypeStateMachine, dstState: TypeState): ref StateInfo[TypeState] =
+  ## Setup the tempStack with the states we're going to enter.
+  ##
+  ## This is found by searching up the dstState's parents for a
+  ## state that is already active i.e. stateInfo.active == true.
+  ## The state and all of the inactive parents will be placed on
+  ## the tempStack as the list of states to enter.
+  ##
+  ## result is the common ancestor parent or nil if there is none
+  sm.tempStack.setLen(0)
+  result = sm.states.mget(dstState)
+
+  # Always add the first state as we must always enter the dstState
+  # whether its active or not.
+  while true:
+    when DBG: echo "setupTempStackWithStatesToEnter: will enter state=",
+        result.name
+    sm.tempStack.add(result)
+    result = result.parentStateInfo
+    if result == nil or result.active:
+      break
 
 proc invokeEnterProcs[TypeStateMachine](sm: ref TypeStateMachine,
     stateStackEnteringIndex: int) =
+  ## Invoke the enter procs starting at sm.stateStack[stateStackEnteringIndex].
+  ## In addition these are marked active so we can find the common state info
+  ## in the future.
   for i in countup(stateStackEnteringIndex, sm.stateStack.high):
-    var enter = sm.stateStack[i].enter
-    if enter != nil:
-      enter(sm, nil)
+    var si = sm.stateStack[i]
+    si.active = true
+    if si.enter != nil:
+      when DBG: echo "invokeEnterProcs: state=", si.name
+      si.enter(sm, nil)
+
+proc invokeExitProcs[TypeStateMachine, TypeState](
+    sm: ref TypeStateMachine, commonSi: ref StateInfo[TypeState]) =
+  ## Invoke the exit proc starting at the top of the stateStack downto
+  ## the commonSi. If commonSi is nil then we'll be exiting all states.
+  ## Also, every state we exit we'll remove from the stateStack and mark
+  ## it not active.
+  var tos = sm.stateStack.high
+  var idx: int
+  for idx in countdown(sm.stateStack.high, sm.stateStack.low):
+    var si = sm.stateStack[idx]
+    if si != commonSi:
+      when DBG: echo "invokeExitProcs: state=", si.name
+      if si.exit != nil:
+        si.exit(sm, nil)
+      si.active = false
+    else:
+      break;
+  when DBG: echo "invokeExitProcs: idx=", idx
+  # Pop the exited states
+  sm.stateStack.delete(idx, tos)
+
+proc performTransitions[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
+    msg: MsgPtr) =
+  if sm.dstState != nil:
+    # Loop incase exit or enter methods invoke transitionTo
+    var dstState = sm.dstState
+    while true:
+      # Get the states to enter and place them on the tempStack. Also
+      # find the common ancestor state.
+      var commonSi = sm.setupTempStackWithStatesToEnter(dstState)
+
+      # Starting at the top of the stateStack down to the common state
+      # pop them from the stateStack and invoke the exit proc.
+      sm.invokeExitProcs(commonSi)
+
+      # Move the temp stack to state stack and invoke enter on the
+      # new entries.
+      var startingEnteringIndex = sm.moveTempStackToStateStack()
+      sm.invokeEnterProcs(startingEnteringIndex)
+
+      # Check if the dstState has changed
+      if sm.dstState != nil and sm.dstState != dstState:
+        # Did change so continue looping
+        dstState = sm.dstState
+        when DBG: echo "performTransitions:  new dest=",
+          sm.states[dstState].name
+      else:
+        # Did not change so we're done
+        sm.curState = dstState
+        sm.dstState = nil
+        when DBG: echo "performTransitions:- curState=",
+          sm.states[sm.curState].name
+        break
 
 proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
     initialState: TypeState) =
@@ -108,6 +167,12 @@ proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
   sm.stateStack.setLen(0)
   invokeEnterProcs[TypeStateMachine](sm, moveTempStackToStateStack(sm))
 
+proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
+  ## dispatcher cast cp to a TypeStateMachine and call current state
+  var sm = cast[ref TypeStateMachine](cp)
+  sm.curState(sm, msg)
+  performTransitions[TypeStateMachine, TypeState](sm, msg)
+
 proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
     state: TypeState, enter: TypeState, exit: TypeState,
     parent: TypeState) =
@@ -116,14 +181,15 @@ proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
   if hasKey[TypeState, ref StateInfo[TypeState]](sm.states, state):
     doAssert(false, "state already added: " & name)
   else:
-    var stateInfo = newStateInfo[TypeState](sm, name, state, enter, exit, parent)
-    echo "addState: state=", stateInfo.name
+    var stateInfo = newStateInfo[TypeState](sm, name, state, enter, exit,
+      parent)
+    when DBG: echo "addState: state=", stateInfo.name
     var parentName: string
     if stateInfo.parentStateInfo != nil:
       parentName = stateInfo.parentStateInfo.name
     else:
       parentName = "<nil>"
-    echo "addState: parent=", parentName
+    when DBG: echo "addState: parent=", parentName
     add[TypeState, ref StateInfo[TypeState]](sm.states, state, stateInfo)
 
 proc addState*[TypeState](sm: ref StateMachine[TypeState], name: string,
@@ -134,8 +200,29 @@ proc addState*[TypeState](sm: ref StateMachine[TypeState], name: string,
 
 proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
     state: TypeState) =
-  ## Transition to a new state
-  sm.curState = state
+  ## Save the state we're to transition to when processing of the
+  ## current state has completed.
+  sm.dstState = state
+
+proc initStateMachine*[TypeStateMachine, TypeState](
+    sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
+  ## Initialize StateMachine
+  when DBG: echo "initStateMacine: e"
+  sm.states = newTable[TypeState, ref StateInfo[TypeState]]()
+  sm.name = name
+  sm.pm = dispatcher[TypeStateMachine, TypeState]
+  sm.ma = newMsgArena()
+  sm.ml = ml
+  sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
+  sm.curState = nil
+  sm.stateStack = @[]
+  sm.tempStack = @[]
+  when DBG: echo "initStateMacine: x"
+
+proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
+  ## deinitialize StateMachine
+  sm.rcvq.delMpscFifo()
+  sm.ma.delMsgArena()
 
 when isMainModule:
   import unittest
