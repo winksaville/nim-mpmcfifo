@@ -7,7 +7,7 @@ import msg, msgarena, msglooper, mpscfifo, fifoutils
 import tables, typeinfo, os, sequtils
 
 const
-  DBG = false
+  DBG = true
 
 type
   StateInfo[TypeState] = object of RootObj
@@ -24,6 +24,7 @@ type
     dstState*: TypeState
     stateStack: seq[ref StateInfo[TypeState]]
     tempStack: seq[ref StateInfo[TypeState]]
+    deferredMessages: seq[MsgPtr]
     ma*: MsgArenaPtr
     ml*: MsgLooperPtr
     states: TableRef[TypeState, ref StateInfo[TypeState]]
@@ -62,6 +63,23 @@ proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
   for i in countdown(sm.tempStack.high, 0):
     var curSi = sm.tempStack[i]
     sm.stateStack.add(sm.tempStack[i])
+
+proc moveDeferredMessagesToFrontOfQueue[TypeStateMachine](
+    sm: ref TypeStateMachine) =
+  ## Move the contents of the temporary stack to the state stack
+  ## reversing the order of the items which are on the temporary
+  ## stack.
+  ##
+  ## result is the index into sm.stateStack where entering needs to start
+  when DBG: echo "moveDeferredMessagetoFrontOfQueue: len=",
+    sm.deferredMessages.len
+  if sm.deferredMessages.len > 0:
+    for i in countdown(sm.deferredMessages.high, sm.deferredMessages.low):
+      var msg = sm.deferredMessages[i]
+      when DBG: echo "moveDeferredMessagetoFrontOfQueue: msg=", msg
+      sm.rcvq.addToFront(msg)
+    sm.deferredMessages.setLen(0)
+    sm.rcvq.ping()
 
 proc setupTempStackWithStatesToEnter[TypeStateMachine, TypeState](
     sm: ref TypeStateMachine, dstState: TypeState): ref StateInfo[TypeState] =
@@ -138,6 +156,12 @@ proc performTransitions[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
       var startingEnteringIndex = sm.moveTempStackToStateStack()
       sm.invokeEnterProcs(startingEnteringIndex)
 
+      # Since we have transitioned to a new state we need to have
+      # any deferred messages move to the front of the message queue
+      # so they will be processed before any other messages in the
+      # message queue.
+      sm.moveDeferredMessagesToFrontOfQueue()
+
       # Check if the dstState has changed
       if sm.dstState != nil and sm.dstState != dstState:
         # Did change so continue looping
@@ -205,6 +229,17 @@ proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
   ## current state has completed.
   sm.dstState = state
 
+proc deferMessage*[TypeState](sm: ref StateMachine[TypeState],
+    msg: MsgPtr) =
+  ## Save the message on the deferred list. The deferred list
+  ## will be moved to the front of the msg queue after each
+  ## transition to a new state in the order they were deferred
+  ## with the oldest at the beginning of the queue.
+  ##
+  ## We assume ownership of the message has been transferred
+  ## to the statemachine thus it is not necessary to copy it.
+  sm.deferredMessages.add(msg)
+
 proc initStateMachine*[TypeStateMachine, TypeState](
     sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
   ## Initialize StateMachine
@@ -218,6 +253,7 @@ proc initStateMachine*[TypeStateMachine, TypeState](
   sm.curState = nil
   sm.stateStack = @[]
   sm.tempStack = @[]
+  sm.deferredMessages = @[]
   when DBG: echo "initStateMacine: x"
 
 proc deinitStateMachine*[TypeState](sm: ref StateMachine[TypeState]) =
