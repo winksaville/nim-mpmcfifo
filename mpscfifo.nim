@@ -242,34 +242,6 @@ proc rmv*(q: QueuePtr): MsgPtr {.inline.} =
   var mq = cast[MsgQueuePtr](q)
   result = rmv(q, mq.blocking)
 
-proc addToFront*(q: QueuePtr, msg: MsgPtr) =
-  ## Add the msg to the front of the fifo (head)
-  if msg != nil:
-    var mq = cast[MsgQueuePtr](q)
-    when DBG:
-      proc dbg(s:string) = echo mq.name & ".addToFront:" & s
-      dbg "+ msg=" & $msg & " mq=" & $mq
-
-    # Be sure msg.next is nil
-    msg.next =  nil
-
-    # serialization-point wrt to the single consumer, acquire-release
-    var prevHead = atomicExchangeN(addr mq.head, msg, ATOMIC_ACQ_REL)
-    atomicStoreN(addr prevHead.next, msg, ATOMIC_RELEASE)
-
-    when DBG: dbg "- mq=" & $mq
-
-proc ping*(q: QueuePtr) =
-  var mq = cast[MsgQueuePtr](q)
-  mq.lock[].acquire()
-  var prevCondBool = atomicExchangeN(mq.condBool, true, ATOMIC_RELEASE)
-  #if not prevCondBool:
-  block:
-    # We've transitioned from false to true so signal
-    when DBG: dbg "  NOT-EMPTY signal cond"
-    mq.cond[].signal()
-  mq.lock[].release
-
 when isMainModule:
   import unittest
 

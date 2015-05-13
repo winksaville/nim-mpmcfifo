@@ -76,7 +76,13 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
         when DBG: dbg " added  idx=" & $idx
       of full:
-        var msg = mp.mq.rmv(nilIfEmpty)
+        var msg: MsgPtr = nil
+        # TODO: Remove an indirection?
+        if mp.cp.hipriorityMsgs.len > 0:
+          msg = mp.cp.hipriorityMsgs[mp.cp.hipriorityMsgs.high]
+          mp.cp.hipriorityMsgs.setLen(mp.cp.hipriorityMsgs.len-1)
+        if msg == nil:
+          msg = mp.mq.rmv(nilIfEmpty)
         if msg != nil:
           processedAtLeastOneMsg = true
           when DBG: dbg " full processing msg=" & $msg

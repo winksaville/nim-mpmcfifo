@@ -2,12 +2,11 @@
 ## a process to execute and the states may be arranged in a hierarchy.
 ##
 ## TODO: Add tests specfically transitions up and down the hierarchy.
-## TODO: Add support for deferred messages.
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 import tables, typeinfo, os, sequtils
 
 const
-  DBG = true
+  DBG = false
 
 type
   StateInfo[TypeState] = object of RootObj
@@ -64,22 +63,19 @@ proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
     var curSi = sm.tempStack[i]
     sm.stateStack.add(sm.tempStack[i])
 
-proc moveDeferredMessagesToFrontOfQueue[TypeStateMachine](
+proc moveDeferredMessagesToHipriorityMsgs[TypeStateMachine](
     sm: ref TypeStateMachine) =
-  ## Move the contents of the temporary stack to the state stack
-  ## reversing the order of the items which are on the temporary
-  ## stack.
+  ## Move the deferred messages to high priority list
   ##
   ## result is the index into sm.stateStack where entering needs to start
-  when DBG: echo "moveDeferredMessagetoFrontOfQueue: len=",
+  when DBG: echo "moveDeferredMessagesToHipriorityMsgs: len=",
     sm.deferredMessages.len
   if sm.deferredMessages.len > 0:
     for i in countdown(sm.deferredMessages.high, sm.deferredMessages.low):
       var msg = sm.deferredMessages[i]
-      when DBG: echo "moveDeferredMessagetoFrontOfQueue: msg=", msg
-      sm.rcvq.addToFront(msg)
+      when DBG: echo "moveDeferredMessagesToHipriorityMsgs: msg=", msg
+      sm.hipriorityMsgs.add(msg)
     sm.deferredMessages.setLen(0)
-    sm.rcvq.ping()
 
 proc setupTempStackWithStatesToEnter[TypeStateMachine, TypeState](
     sm: ref TypeStateMachine, dstState: TypeState): ref StateInfo[TypeState] =
@@ -160,7 +156,7 @@ proc performTransitions[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
       # any deferred messages move to the front of the message queue
       # so they will be processed before any other messages in the
       # message queue.
-      sm.moveDeferredMessagesToFrontOfQueue()
+      sm.moveDeferredMessagesToHipriorityMsgs()
 
       # Check if the dstState has changed
       if sm.dstState != nil and sm.dstState != dstState:
@@ -249,6 +245,7 @@ proc initStateMachine*[TypeStateMachine, TypeState](
   sm.pm = dispatcher[TypeStateMachine, TypeState]
   sm.ma = newMsgArena()
   sm.ml = ml
+  sm.hipriorityMsgs = @[]
   sm.rcvq = newMpscFifo("fifo_" & name, sm.ma, sm.ml)
   sm.curState = nil
   sm.stateStack = @[]
@@ -276,8 +273,9 @@ when isMainModule:
 
     ## Forward declare states
     proc default(sm: ref SmT1, msg: MsgPtr)
-    proc s1(sm: ref SmT1, msg: MsgPtr)
     proc s0(sm: ref SmT1, msg: MsgPtr)
+    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr)
+    proc s1(sm: ref SmT1, msg: MsgPtr)
 
     proc defaultEnter(sm: ref SmT1, msg: MsgPtr) =
       echo "defaultEnter"
@@ -302,6 +300,17 @@ when isMainModule:
       transitionTo[SmT1State](sm, s1)
       msg.rspq.add(msg)
 
+    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr) =
+      ## S0DeferToS1 processes defers 2 messages and then
+      ## transitions to s1
+      sm.count += 1
+      sm.s0Count += 1
+      echo "s0: count=", sm.count
+      deferMessage[SmT1State](sm, msg)
+      if sm.s0Count >= 2:
+        transitionTo[SmT1State](sm, s1)
+
+
     proc s1Enter(sm: ref SmT1, msg: MsgPtr) =
       echo "s1Enter"
     proc s1Exit(sm: ref SmT1, msg: MsgPtr) =
@@ -311,7 +320,6 @@ when isMainModule:
       sm.count += 1
       sm.s1Count += 1
       echo "s1: count=", sm.count
-      transitionTo[SmT1State](sm, s0)
       msg.rspq.add(msg)
 
     proc newSmT1NonState(ml: MsgLooperPtr): ref SmT1 =
@@ -339,6 +347,16 @@ when isMainModule:
       addState[SmT1State](smT1, "s0", s0)
       addState[SmT1State](smT1, "s1", s1)
       startStateMachine[SmT1, SmT1State](smT1, s0)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1TwoStates:-"
+
+    proc newSmT1TwoStatesS0DeferToS1(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addState[SmT1State](smT1, "s0DeferToS1", s0DeferToS1)
+      addState[SmT1State](smT1, "s1", s1)
+      startStateMachine[SmT1, SmT1State](smT1, s0DeferToS1)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1TwoStates:-"
@@ -393,9 +411,15 @@ when isMainModule:
         check sm.s1Count == 0
 
       var sm1 = addComponent[SmT1](ml, newSmT1OneState)
+      check sm1.stateStack.low == 0
+      check sm1.stateStack.high == 0
+      check sm1.stateStack[0].name == "default"
       checkSendingTwoMsgs(sm1, ma, rcvq)
 
       var sm2 = addComponent[SmT1](ml, newSmT1OneState)
+      check sm2.stateStack.low == 0
+      check sm2.stateStack.high == 0
+      check sm2.stateStack[0].name == "default"
       checkSendingTwoMsgs(sm2, ma, rcvq)
 
       # delete the first one added
@@ -445,9 +469,6 @@ when isMainModule:
         check sm.s0Count == 0
         check sm.s1Count == 0
 
-      check smT1.stateStack.low == 0
-      check smT1.stateStack.high == 0
-      check smT1.stateStack[0].name == "default"
       checkSendingTwoMsgs(smT1, ma, rcvq)
 
     # Test with two states s0, s1
@@ -462,10 +483,6 @@ when isMainModule:
       var
         rcvq = newMpscFifo("rcvq", smT1.ma)
         msg: MsgPtr
-
-      check smT1.stateStack.low == 0
-      check smT1.stateStack.high == 0
-      check smT1.stateStack[0].name == "s0"
 
       # Send first message, should be processed by S0
       msg = smT1.ma.getMsg(rcvq, 1)
@@ -487,6 +504,42 @@ when isMainModule:
       check smt1.s0Count == 1
       check smt1.s1Count == 1
 
+    # Test deferred msgs, we have to have at least two states
+    # and must do a transition to test the deferred msgs
+    setup:
+      smT1 = addComponent[SmT1](ml, newSmT1TwoStatesS0DeferToS1)
+
+    teardown:
+      delComponent(ml, smT1, delSmT1)
+      smT1 = nil
+
+    test "test-deferred-msgs":
+      var
+        rcvq = newMpscFifo("rcvq", smT1.ma)
+        msg: MsgPtr
+
+      # Send three messages first two will be processed by S0DeferToS1
+      # but deferred. On the second message to S0DeferToS1 it will
+      # transition to S1 which will then process all 3 messages.
+      msg = smT1.ma.getMsg(rcvq, 1)
+      smT1.rcvq.add(msg)
+      msg = smT1.ma.getMsg(rcvq, 2)
+      smT1.rcvq.add(msg)
+      msg = smT1.ma.getMsg(rcvq, 3)
+      smT1.rcvq.add(msg)
+
+      # Get the responses which should be in the proper order
+      msg = rcvq.rmv()
+      check msg.cmd == 1
+      msg = rcvq.rmv()
+      check msg.cmd == 2
+      msg = rcvq.rmv()
+      check msg.cmd == 3
+      check smt1.count == 5
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 2
+      check smt1.s1Count == 3
+
     # Test with default and two child states s0, s1 in a triangle
     # TODO: Add passing of unhandled message and verify
     # TODO: that default is invoked
@@ -497,7 +550,7 @@ when isMainModule:
       delComponent(ml, smT1, delSmT1)
       smT1 = nil
 
-    test "test-trinagle-states":
+    test "test-triangle-hsm":
       var
         rcvq = newMpscFifo("rcvq", smT1.ma)
         msg: MsgPtr

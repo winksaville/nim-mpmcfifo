@@ -12,6 +12,9 @@ type
     pm*: ProcessMsg
     # ProcessMsg proc
 
+    hipriorityMsgs*: seq[MsgPtr]
+    # Hipriority messages are processed first by msglooper
+
     rcvq*: QueuePtr
     # receive queue pointer
 
@@ -30,7 +33,10 @@ proc `$`*(msg: MsgPtr): string =
   else:
     result = "{" &
                 ptrToStr("msg:", msg) &
+                ptrToStr(" next:", msg.next) &
                 ptrToStr(" rspQ=", msg.rspQ) &
                 " cmd=" & $msg.cmd &
+                " extra=" & (if msg.extra == 0: "0" else :
+                              "0x" & toHex(msg.extra, sizeof(int)*2)) &
               "}"
 
