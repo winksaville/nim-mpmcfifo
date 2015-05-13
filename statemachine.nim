@@ -1,9 +1,21 @@
 ## A hierarchical state machine where the current state is defined as
 ## a process to execute and the states may be arranged in a hierarchy.
 ##
-## TODO: Add tests specfically transitions up and down the hierarchy.
+## TODO: Add many more tests especially up and down the hierarchy
+##
 ## TODO: Return the messsages to the arena
+##
 ## TODO: Check for other memory leaks!
+##
+## TODO: Add "quiting" which must invoke all of the exit methods.
+##
+## TODO: One problem is that with the tester running asynchronously
+## TODO: with the StateMachine and responding with a message from
+## TODO: using the counters in enter/exit doesn't work because the
+## TODO: exit/enter procs are called after the response has been
+## TODO: sent. We should devise a synchronous test harness which or
+## TODO: use a logging technique as in the StateMachine.java code
+## TODO: in Android.
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 import tables, typeinfo, os, sequtils
 
@@ -11,6 +23,9 @@ const
   DBG = false
 
 type
+  StateResult = enum
+    Handled, NotHandled
+
   StateInfo[TypeState] = object of RootObj
     name: string
     active: bool
@@ -63,7 +78,8 @@ proc moveTempStackToStateStack[TypeStateMachine](sm: ref TypeStateMachine):
   result = sm.stateStack.high + 1
   for i in countdown(sm.tempStack.high, 0):
     var curSi = sm.tempStack[i]
-    sm.stateStack.add(sm.tempStack[i])
+    when DBG: echo "moveTempStackToStateStack: state=", curSi.name
+    sm.stateStack.add(curSi)
 
 proc moveDeferredMessagesToHipriorityMsgs[TypeStateMachine](
     sm: ref TypeStateMachine) =
@@ -101,6 +117,8 @@ proc setupTempStackWithStatesToEnter[TypeStateMachine, TypeState](
     result = result.parentStateInfo
     if result == nil or result.active:
       break
+  when DBG: echo "setupTempStackWithStatesToEnter: common state=",
+      (if result == nil: "<nil>" else: result.name)
 
 proc invokeEnterProcs[TypeStateMachine](sm: ref TypeStateMachine,
     stateStackEnteringIndex: int) =
@@ -112,7 +130,7 @@ proc invokeEnterProcs[TypeStateMachine](sm: ref TypeStateMachine,
     si.active = true
     if si.enter != nil:
       when DBG: echo "invokeEnterProcs: state=", si.name
-      si.enter(sm, nil)
+      discard si.enter(sm, nil)
 
 proc invokeExitProcs[TypeStateMachine, TypeState](
     sm: ref TypeStateMachine, commonSi: ref StateInfo[TypeState]) =
@@ -120,23 +138,24 @@ proc invokeExitProcs[TypeStateMachine, TypeState](
   ## the commonSi. If commonSi is nil then we'll be exiting all states.
   ## Also, every state we exit we'll remove from the stateStack and mark
   ## it not active.
-  var tos = sm.stateStack.high
-  var idx: int
+  var stateStackLen = sm.stateStack.len
+  var count = 0
   for idx in countdown(sm.stateStack.high, sm.stateStack.low):
     var si = sm.stateStack[idx]
     if si != commonSi:
       when DBG: echo "invokeExitProcs: state=", si.name
+      count += 1
       if si.exit != nil:
-        si.exit(sm, nil)
+        discard si.exit(sm, nil)
       si.active = false
     else:
       break;
-  when DBG: echo "invokeExitProcs: idx=", idx
   # Pop the exited states
-  sm.stateStack.delete(idx, tos)
+  sm.stateStack.setLen(stateStackLen - count)
 
 proc performTransitions[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
     msg: MsgPtr) =
+  ## Perform any necessary transitions
   if sm.dstState != nil:
     # Loop incase exit or enter methods invoke transitionTo
     var dstState = sm.dstState
@@ -180,7 +199,7 @@ proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
   sm.curState = initialState
 
   # Push onto the tempStack current and all its parents.
-  var  curSi = mget[TypeState, ref StateInfo[TypeState]](
+  var curSi = mget[TypeState, ref StateInfo[TypeState]](
         sm.states, sm.curState)
   while curSi != nil:
     sm.tempStack.add(curSi)
@@ -193,7 +212,25 @@ proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
 proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
   ## dispatcher cast cp to a TypeStateMachine and call current state
   var sm = cast[ref TypeStateMachine](cp)
-  sm.curState(sm, msg)
+  var val = sm.curState(sm, msg)
+  var curSi: ref StateInfo[TypeState]
+  if val != Handled:
+    when DBG: echo "dispatcher: ", sm.name, ".", sm.stateStack[sm.stateStack.high].name,
+      " !Handled msg:", msg
+    curSi = sm.stateStack[sm.stateStack.high].parentStateInfo
+    while curSi != nil:
+      val = curSi.state(sm, msg)
+      if val == Handled:
+        break;
+      when DBG: echo "dispatcher: ", sm.name, ".", curSi.name,
+        " did not handle msg:", msg
+      curSi = curSi.parentStateInfo
+  else:
+    when DBG: curSi = sm.stateStack[sm.stateStack.high]
+  when DBG:
+    if curSi != nil:
+      echo "dispatcher: ", sm.name, ".", curSi.name, " Handled msg:", msg
+
   performTransitions[TypeStateMachine, TypeState](sm, msg)
 
 proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
@@ -265,7 +302,7 @@ when isMainModule:
 
   suite "t1":
     type
-      SmT1State = proc(sm: ref SmT1, msg: MsgPtr)
+      SmT1State = proc(sm: ref SmT1, msg: MsgPtr): StateResult
       SmT1 = object of StateMachine[SmT1State]
         ## SmT1 is a statemachine with a counter
         count: int
@@ -274,35 +311,42 @@ when isMainModule:
         s1Count: int
 
     ## Forward declare states
-    proc default(sm: ref SmT1, msg: MsgPtr)
-    proc s0(sm: ref SmT1, msg: MsgPtr)
-    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr)
-    proc s1(sm: ref SmT1, msg: MsgPtr)
+    proc default(sm: ref SmT1, msg: MsgPtr): StateResult
+    proc s0(sm: ref SmT1, msg: MsgPtr): StateResult
+    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr): StateResult
+    proc s0TransitionToS1NotHandled(sm: ref SmT1, msg: MsgPtr): StateResult
+    proc s1(sm: ref SmT1, msg: MsgPtr): StateResult
+    proc s1NotHandled(sm: ref SmT1, msg: MsgPtr): StateResult
 
-    proc defaultEnter(sm: ref SmT1, msg: MsgPtr) =
+    proc defaultEnter(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "defaultEnter"
-    proc defaultExit(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc defaultExit(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "defaultExit"
-    proc default(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc default(sm: ref SmT1, msg: MsgPtr): StateResult =
       ## default state no transition increments counters
       sm.count += 1
       sm.defaultCount += 1
       echo "default: count=", sm.count
       msg.rspq.add(msg)
+      result = Handled
 
-    proc s0Enter(sm: ref SmT1, msg: MsgPtr) =
+    proc s0Enter(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "s0Enter"
-    proc s0Exit(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc s0Exit(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "s0Exit"
-    proc s0(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc s0(sm: ref SmT1, msg: MsgPtr): StateResult =
       ## S0 state transitions to S1 increments counter
       sm.count += 1
       sm.s0Count += 1
       echo "s0: count=", sm.count
       transitionTo[SmT1State](sm, s1)
       msg.rspq.add(msg)
-
-    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc s0DeferToS1(sm: ref SmT1, msg: MsgPtr): StateResult =
       ## S0DeferToS1 processes defers 2 messages and then
       ## transitions to s1
       sm.count += 1
@@ -311,18 +355,36 @@ when isMainModule:
       deferMessage[SmT1State](sm, msg)
       if sm.s0Count >= 2:
         transitionTo[SmT1State](sm, s1)
+      result = Handled
+    proc s0TransitionToS1NotHandled(sm: ref SmT1, msg: MsgPtr): StateResult =
+      ## S0 state transitions to S1 increments counter
+      sm.count += 1
+      sm.s0Count += 1
+      echo "s0: count=", sm.count
+      transitionTo[SmT1State](sm, s1NotHandled)
+      msg.rspq.add(msg)
+      result = Handled
 
 
-    proc s1Enter(sm: ref SmT1, msg: MsgPtr) =
+    proc s1Enter(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "s1Enter"
-    proc s1Exit(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc s1Exit(sm: ref SmT1, msg: MsgPtr): StateResult =
       echo "s1Exit"
-    proc s1(sm: ref SmT1, msg: MsgPtr) =
+      result = Handled
+    proc s1(sm: ref SmT1, msg: MsgPtr): StateResult =
       ## S1 state transitions to S0 and increments counter
       sm.count += 1
       sm.s1Count += 1
       echo "s1: count=", sm.count
       msg.rspq.add(msg)
+      result = Handled
+    proc s1NotHandled(sm: ref SmT1, msg: MsgPtr): StateResult =
+      ## S1 state transitions to S0 and increments counter
+      sm.count += 1
+      sm.s1Count += 1
+      echo "s1: count=", sm.count
+      result = NotHandled
 
     proc newSmT1NonState(ml: MsgLooperPtr): ref SmT1 =
       echo "initSmT1NonState:+"
@@ -366,10 +428,12 @@ when isMainModule:
     proc newSmT1TriangleStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
 
-      addStateEXP[SmT1State](smT1, "default", default, defaultEnter, defaultExit, nil)
-      addStateEXP[SmT1State](smT1, "s0", s0, s0Enter, s0Exit, default)
-      addStateEXP[SmT1State](smT1, "s1", s1, s1Enter, s1Exit, default)
-      startStateMachine[SmT1, SmT1State](smT1, s0)
+      addStateEXP[SmT1State](smT1, "default", default, defaultEnter,
+        defaultExit, nil)
+      addStateEXP[SmT1State](smT1, "s0TransitionToS1NotHandled",
+        s0TransitionToS1NotHandled, s0Enter, s0Exit, default)
+      addStateEXP[SmT1State](smT1, "s1NotHandled", s1NotHandled, s1Enter, s1Exit, default)
+      startStateMachine[SmT1, SmT1State](smT1, s0TransitionToS1NotHandled)
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1TringleStates:-"
@@ -542,9 +606,8 @@ when isMainModule:
       check smt1.s0Count == 2
       check smt1.s1Count == 3
 
-    # Test with default and two child states s0, s1 in a triangle
-    # TODO: Add passing of unhandled message and verify
-    # TODO: that default is invoked
+    # Test with default and two child states s0TransitionToS1NotHandled,
+    # s1NotHandled in a triangle and default as the base state
     setup:
       smT1 = addComponent[SmT1](ml, newSmT1TriangleStates)
 
@@ -560,7 +623,12 @@ when isMainModule:
       check smT1.stateStack.low == 0
       check smT1.stateStack.high == 1
       check smT1.stateStack[0].name == "default"
-      check smT1.stateStack[1].name == "s0"
+      check smT1.stateStack[1].name == "s0TransitionToS1NotHandled"
+
+      check smt1.count == 0
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 0
+      check smt1.s1Count == 0
 
       # Send first message, should be processed by S0
       msg = smT1.ma.getMsg(rcvq, 1)
@@ -577,7 +645,12 @@ when isMainModule:
       smT1.rcvq.add(msg)
       msg = rcvq.rmv()
       check msg.cmd == 2
-      check smt1.count == 2
-      check smt1.defaultCount == 0
+      check smt1.count == 3
+      check smt1.defaultCount == 1
       check smt1.s0Count == 1
       check smt1.s1Count == 1
+
+      check smT1.stateStack.low == 0
+      check smT1.stateStack.high == 1
+      check smT1.stateStack[0].name == "default"
+      check smT1.stateStack[1].name == "s1NotHandled"
