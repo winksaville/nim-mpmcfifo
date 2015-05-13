@@ -2,6 +2,8 @@
 ## a process to execute and the states may be arranged in a hierarchy.
 ##
 ## TODO: Add tests specfically transitions up and down the hierarchy.
+## TODO: Return the messsages to the arena
+## TODO: Check for other memory leaks!
 import msg, msgarena, msglooper, mpscfifo, fifoutils
 import tables, typeinfo, os, sequtils
 
