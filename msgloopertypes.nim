@@ -9,7 +9,7 @@ const
 
 type
   MsgProcessorState* = enum
-    empty, busy, adding, full, deleting
+    empty, busy, adding, added, deleting
 
   MsgProcessorPtr* = ptr MsgProcessor
   MsgProcessor* = object

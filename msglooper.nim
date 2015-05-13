@@ -1,3 +1,7 @@
+## Message looper dispatches messages to Components or
+## ProcessorMsgs that are added to it.
+##
+## TODO: delMsgLooper is NOT implemented
 import os, locks
 import msg, mpscfifo, msgarena, fifoutils, strutils
 
@@ -62,41 +66,45 @@ proc looper(ml: MsgLooperPtr) {.thread.} =
       var mp = ml.listMsgProcessor[idx]
       case atomicLoadN[MsgProcessorState](addr mp.state, ATOMIC_ACQUIRE)
       of empty, busy:
-        when DBG: dbg " empty/busy idx=" & $idx
+        when DBG: dbg " empty/busy state: idx=" & $idx
       of adding:
-        when DBG: dbg " adding idx=" & $idx
+        when DBG: dbg " adding state: idx=" & $idx
         var cp = mp.newComponent(ml)
         mp.cp = cp
         mp.mq = cp.rcvq
         mp.pm = cp.pm
-        mp.state = full
+        atomicStoreN[MsgProcessorState](addr mp.state, added, ATOMIC_RELEASE)
         var msg = ml.ma.getMsg(1)
         msg.extra = cast[int](mp.cp)
         mp.rspq.add(msg)
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
-        when DBG: dbg " added  idx=" & $idx
-      of full:
+        when DBG: dbg " adding state: added  idx=" & $idx
+      of added:
         var msg: MsgPtr = nil
         # TODO: Remove an indirection?
-        if mp.cp.hipriorityMsgs.len > 0:
-          msg = mp.cp.hipriorityMsgs[mp.cp.hipriorityMsgs.high]
-          mp.cp.hipriorityMsgs.setLen(mp.cp.hipriorityMsgs.len-1)
-        if msg == nil:
+        if mp.cp != nil:
+          if mp.cp.hipriorityMsgs.len > 0:
+            msg = mp.cp.hipriorityMsgs[mp.cp.hipriorityMsgs.high]
+            mp.cp.hipriorityMsgs.setLen(mp.cp.hipriorityMsgs.len-1)
+          if msg == nil:
+            msg = mp.mq.rmv(nilIfEmpty)
+        else:
           msg = mp.mq.rmv(nilIfEmpty)
+
         if msg != nil:
           processedAtLeastOneMsg = true
-          when DBG: dbg " full processing msg=" & $msg
+          when DBG: dbg " adde state processing msg=" & $msg
           mp.pm(mp.cp, msg)
           # Cannot assume msg is valid here
         else:
-          when DBG: dbg " full no msgs idx=" & $idx
+          when DBG: dbg " added state: no msgs idx=" & $idx
       of deleting:
-        when DBG: dbg " deleting idx=" & $idx
+        when DBG: dbg " deleting state: idx=" & $idx
         mp.delComponent(mp.cp)
-        mp.state = empty
+        atomicStoreN[MsgProcessorState](addr mp.state, empty, ATOMIC_RELEASE)
         mp.rspq.add(ml.ma.getMsg(1))
         atomicStoreN(ml.condBool, false, ATOMIC_RELEASE)
-        when DBG: dbg " deleted  idx=" & $idx
+        when DBG: dbg " deleting state: deleted idx=" & $idx
 
     if not processedAtLeastOneMsg:
       # No messages to process so wait
@@ -162,7 +170,7 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
     dbg "+"
 
   # See if there is an empty slot
-  var added = false
+  var noneAdded = true
   for idx in 0..listMsgProcessorMaxLen-1:
     var mp = ml.listMsgProcessor[idx]
     var emptyState = empty
@@ -173,13 +181,15 @@ proc addProcessMsg*(ml: MsgLooperPtr, pm: ProcessMsg, q: QueuePtr,
       mp.cp = cp
       mp.mq = mq
       mp.pm = pm
-      mp.state = full
+      atomicStoreN[MsgProcessorState](addr mp.state, added, ATOMIC_RELEASE)
+      when DBG: dbg "added idx=" & $idx
       ping(ml)
-      added = true
+      noneAdded = false
+      break
 
-  if not added:
-      doAssert(ml.listMsgProcessorLen < listMsgProcessorMaxLen,
-        "Attempted to add too many ProcessMsg, maximum is " &
+  if noneAdded:
+      doAssert(ml.listMsgProcessorLen <= listMsgProcessorMaxLen,
+        "Attempted to add too many (" & $ml.listMsgProcessorLen & ") ProcessMsg procs, maximum is " &
         $listMsgProcessorMaxLen)
 
   when DBG: dbg "-"
@@ -215,7 +225,7 @@ proc addComponent(ml: MsgLooperPtr,
         ml.listMsgProcessorLen += 1
       mp.newComponent = newComponent
       mp.rspq = rspq
-      mp.state = adding
+      atomicStoreN[MsgProcessorState](addr mp.state, adding, ATOMIC_RELEASE)
       ping(ml)
       added = true
       break
@@ -248,22 +258,22 @@ proc delComponent(ml: MsgLooperPtr, cp: ComponentPtr,
   when DBG:
     proc dbg(s:string) = echo ml.name & ".delComponent:" & s
     dbg "+"
-  var deletn = false
+  var noneDeleted = true
   for idx in 0..listMsgProcessorMaxLen-1:
     var mp = ml.listMsgProcessor[idx]
-    if mp.state == full and mp.cp == cp:
-      var fullState = full
+    if (atomicLoadN[MsgProcessorState](addr mp.state, ATOMIC_ACQUIRE) == added) and (mp.cp == cp):
+      var addedState = added
       if atomicCompareExchangeN[MsgProcessorState](addr mp.state,
-          addr fullState, busy, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
+          addr addedState, busy, true, ATOMIC_ACQ_REL, ATOMIC_ACQUIRE):
         when DBG: dbg " deleting idx=" & $idx
         mp.delComponent = delComponent
-        mp.state = deleting
+        atomicStoreN[MsgProcessorState](addr mp.state, deleting, ATOMIC_RELEASE)
         mp.rspq = rspq
         ping(ml)
-        deletn = true
+        noneDeleted = false
         break
 
-  if not deletn:
+  if noneDeleted:
     rspq.add(ml.ma.getMsg(1))
   when DBG: dbg "-"
 
