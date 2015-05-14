@@ -1,5 +1,5 @@
-## Benchmark multiple producer single consumer
-## with one thread.
+## Benchmark multiple producers and one consumer with
+## one thread for all producers and consumer.
 import msg, mpscfifo, msgarena, msglooper, math, os, locks
 
 # include bmSuite so we can use it inside t(name: string)
