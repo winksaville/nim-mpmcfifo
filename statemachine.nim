@@ -53,10 +53,8 @@ proc newStateInfo[TypeState](sm: ref StateMachine[TypeState], name: string,
     parentStateInfo: ref StateInfo[TypeState]
 
   new(result)
-  if parent != nil and hasKey[TypeState, ref StateInfo[TypeState]](
-      sm.states, parent):
-    parentStateInfo = mget[TypeState, ref StateInfo[TypeState]](
-      sm.states, parent)
+  if parent != nil and hasKey(sm.states, parent):
+    parentStateInfo = mget(sm.states, parent)
     when DBG: echo "parent=", parentStateInfo.name
   else:
     when DBG: echo "parent not in table"
@@ -199,15 +197,56 @@ proc startStateMachine*[TypeStateMachine, TypeState](sm: ref TypeStateMachine,
   sm.curState = initialState
 
   # Push onto the tempStack current and all its parents.
-  var curSi = mget[TypeState, ref StateInfo[TypeState]](
-        sm.states, sm.curState)
+  var curSi = mget(sm.states, sm.curState)
   while curSi != nil:
     sm.tempStack.add(curSi)
     curSi = curSi.parentStateInfo
 
   # Start with empty stack
   sm.stateStack.setLen(0)
-  invokeEnterProcs[TypeStateMachine](sm, moveTempStackToStateStack(sm))
+  invokeEnterProcs(sm, moveTempStackToStateStack(sm))
+
+proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
+    state: TypeState, enter: TypeState, exit: TypeState,
+    parent: TypeState) =
+  ## Add a new state to the hierarchy. The parent argument may be nil
+  ## if the state has no parent.
+  if hasKey(sm.states, state):
+    doAssert(false, "state already added: " & name)
+  else:
+    var stateInfo = newStateInfo(sm, name, state, enter, exit,
+      parent)
+    when DBG: echo "addState: state=", stateInfo.name
+    var parentName: string
+    if stateInfo.parentStateInfo != nil:
+      parentName = stateInfo.parentStateInfo.name
+    else:
+      parentName = "<nil>"
+    when DBG: echo "addState: parent=", parentName
+    add(sm.states, state, stateInfo)
+
+proc addState*[TypeState](sm: ref StateMachine[TypeState], name: string,
+    state: TypeState) =
+  ## Add a new state to the hierarchy. The parent argument may be nil
+  ## if the state has no parent.
+  addStateEXP(sm, name, state, nil, nil, nil)
+
+proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
+    state: TypeState) =
+  ## Save the state we're to transition to when processing of the
+  ## current state has completed.
+  sm.dstState = state
+
+proc deferMessage*[TypeState](sm: ref StateMachine[TypeState],
+    msg: MsgPtr) =
+  ## Save the message on the deferred list. The deferred list
+  ## will be moved to the front of the msg queue after each
+  ## transition to a new state in the order they were deferred
+  ## with the oldest at the beginning of the queue.
+  ##
+  ## We assume ownership of the message has been transferred
+  ## to the statemachine thus it is not necessary to copy it.
+  sm.deferredMessages.add(msg)
 
 proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
   ## dispatcher cast cp to a TypeStateMachine and call current state
@@ -232,48 +271,6 @@ proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
       echo "dispatcher: ", sm.name, ".", curSi.name, " Handled msg:", msg
 
   performTransitions[TypeStateMachine, TypeState](sm, msg)
-
-proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
-    state: TypeState, enter: TypeState, exit: TypeState,
-    parent: TypeState) =
-  ## Add a new state to the hierarchy. The parent argument may be nil
-  ## if the state has no parent.
-  if hasKey[TypeState, ref StateInfo[TypeState]](sm.states, state):
-    doAssert(false, "state already added: " & name)
-  else:
-    var stateInfo = newStateInfo[TypeState](sm, name, state, enter, exit,
-      parent)
-    when DBG: echo "addState: state=", stateInfo.name
-    var parentName: string
-    if stateInfo.parentStateInfo != nil:
-      parentName = stateInfo.parentStateInfo.name
-    else:
-      parentName = "<nil>"
-    when DBG: echo "addState: parent=", parentName
-    add[TypeState, ref StateInfo[TypeState]](sm.states, state, stateInfo)
-
-proc addState*[TypeState](sm: ref StateMachine[TypeState], name: string,
-    state: TypeState) =
-  ## Add a new state to the hierarchy. The parent argument may be nil
-  ## if the state has no parent.
-  addStateEXP[TypeState](sm, name, state, nil, nil, nil)
-
-proc transitionTo*[TypeState](sm: ref StateMachine[TypeState],
-    state: TypeState) =
-  ## Save the state we're to transition to when processing of the
-  ## current state has completed.
-  sm.dstState = state
-
-proc deferMessage*[TypeState](sm: ref StateMachine[TypeState],
-    msg: MsgPtr) =
-  ## Save the message on the deferred list. The deferred list
-  ## will be moved to the front of the msg queue after each
-  ## transition to a new state in the order they were deferred
-  ## with the oldest at the beginning of the queue.
-  ##
-  ## We assume ownership of the message has been transferred
-  ## to the statemachine thus it is not necessary to copy it.
-  sm.deferredMessages.add(msg)
 
 proc initStateMachine*[TypeStateMachine, TypeState](
     sm: ref StateMachine[TypeState], name: string, ml: MsgLooperPtr) =
