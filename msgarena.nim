@@ -1,5 +1,8 @@
 ## The MsgArena manages getting and returning message from memory
 ## in a thread safe manner and so maybe shared by multipel threads.
+##
+## TODO: Add tests
+## TODO: Using mpmcstack is lock-free but not wait-free, use mpscfifo?
 import msg, mpmcstack, fifoutils, locks, strutils
 
 const
