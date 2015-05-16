@@ -1,8 +1,6 @@
 ## A hierarchical state machine where the current state is defined as
 ## a process to execute and the states may be arranged in a hierarchy.
 ##
-## TODO: Add many more tests especially up and down the hierarchy
-##
 ## TODO: Return the messsages to the arena
 ##
 ## TODO: Check for other memory leaks!
@@ -44,6 +42,20 @@ type
     ma*: MsgArenaPtr
     ml*: MsgLooperPtr
     states: TableRef[TypeState, ref StateInfo[TypeState]]
+
+proc `$`*[TypeState](si: ref StateInfo[TypeState]): string =
+  result = si.name
+
+proc `$`*[TypeState](table: TableRef[TypeState, ref StateInfo[TypeState]]): string =
+  result = "{"
+  var first = true
+  for key, si in table:
+    if first:
+      first = false
+    else:
+      result &= ", "
+    result &= $si
+  result &= "}"
 
 
 proc newStateInfo[TypeState](sm: ref StateMachine[TypeState], name: string,
@@ -104,13 +116,15 @@ proc setupTempStackWithStatesToEnter[TypeStateMachine, TypeState](
   ##
   ## result is the common ancestor parent or nil if there is none
   sm.tempStack.setLen(0)
+
+  when DBG: echo("setupTempStackWithStateToEnter: states=", sm.states)
   result = sm.states.mget(dstState)
 
   # Always add the first state as we must always enter the dstState
   # whether its active or not.
   while true:
     when DBG: echo "setupTempStackWithStatesToEnter: will enter state=",
-        result.name
+        result.name, " active=", result.active
     sm.tempStack.add(result)
     result = result.parentStateInfo
     if result == nil or result.active:
@@ -214,6 +228,8 @@ proc addStateEXP*[TypeState](sm: ref StateMachine[TypeState], name: string,
   if hasKey(sm.states, state):
     doAssert(false, "state already added: " & name)
   else:
+    if parent != nil and not hasKey(sm.states, parent):
+      doAssert(false, "parent has not been added")
     var stateInfo = newStateInfo(sm, name, state, enter, exit,
       parent)
     when DBG: echo "addState: state=", stateInfo.name
@@ -250,6 +266,8 @@ proc deferMessage*[TypeState](sm: ref StateMachine[TypeState],
 
 proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
   ## dispatcher cast cp to a TypeStateMachine and call current state
+  when DBG:
+    var msgcmd = msg.cmd
   var sm = cast[ref TypeStateMachine](cp)
   var val = sm.curState(sm, msg)
   var curSi: ref StateInfo[TypeState]
@@ -268,7 +286,7 @@ proc dispatcher[TypeStateMachine, TypeState](cp: ComponentPtr, msg: MsgPtr) =
     when DBG: curSi = sm.stateStack[sm.stateStack.high]
   when DBG:
     if curSi != nil:
-      echo "dispatcher: ", sm.name, ".", curSi.name, " Handled msg:", msg
+      echo "dispatcher: ", sm.name, ".", curSi.name, " Handled msgcmd=", msgcmd
 
   performTransitions[TypeStateMachine, TypeState](sm, msg)
 
@@ -361,6 +379,22 @@ when isMainModule:
       transitionTo[SmT1State](sm, s1NotHandled)
       msg.rspq.add(msg)
       result = Handled
+    proc s0TransitionToSelf(sm: ref SmT1, msg: MsgPtr): StateResult =
+      ## S0 state transitions to Self increments counter
+      ## The self transition should invoke s0Exit and s0Enter
+      sm.count += 1
+      sm.s0Count += 1
+      echo "s0: count=", sm.count
+      transitionTo[SmT1State](sm, s0TransitionToSelf)
+      msg.rspq.add(msg)
+      result = Handled
+    proc s0NoTransition(sm: ref SmT1, msg: MsgPtr): StateResult =
+      ## S0 does not transition
+      sm.count += 1
+      sm.s0Count += 1
+      echo "s0: count=", sm.count
+      msg.rspq.add(msg)
+      result = Handled
 
 
     proc s1Enter(sm: ref SmT1, msg: MsgPtr): StateResult =
@@ -382,6 +416,14 @@ when isMainModule:
       sm.s1Count += 1
       echo "s1: count=", sm.count
       result = NotHandled
+    proc s1TransitionToS0NoTransition(sm: ref SmT1, msg: MsgPtr): StateResult =
+      ## S1 state transitions to S0 and increments counter
+      sm.count += 1
+      sm.s1Count += 1
+      echo "s1: count=", sm.count
+      transitionTo[SmT1State](sm, s0NoTransition)
+      msg.rspq.add(msg)
+      result = Handled
 
     proc newSmT1NonState(ml: MsgLooperPtr): ref SmT1 =
       echo "initSmT1NonState:+"
@@ -402,6 +444,15 @@ when isMainModule:
       result = cast[ptr Component](smT1)
       echo "newSmT1OneState:-"
 
+    proc newSmT1OneStateTransitionToSelf(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addStateEXP[SmT1State](smT1, "s0TransitionToSelf", s0TransitionToSelf, s0Enter, s0Exit, nil)
+      startStateMachine[SmT1, SmT1State](smT1, s0TransitionToSelf)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1OneStateTransitionToSelf:-"
+
     proc newSmT1TwoStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
 
@@ -421,6 +472,28 @@ when isMainModule:
       # TODO: DANGEROUS, but addComponent requires this to return a ptr
       result = cast[ptr Component](smT1)
       echo "newSmT1TwoStates:-"
+
+    proc newSmT1TwoStateHSM_S0S1_StartS0(ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addStateEXP[SmT1State](smT1, "s0", s0, s0Enter, s0Exit, nil)
+      addStateEXP[SmT1State](smT1, "s1", s1, s1Enter, s1Exit, s0)
+      startStateMachine[SmT1, SmT1State](smT1, s0)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1TwoStateHSM_S0S1_StartS0:-"
+
+    proc newSmT1TwoStatesHsm_S0NoTransitionS1TranstionToS0_StartS1TranstionToS0(
+        ml: MsgLooperPtr): ptr Component =
+      var smT1 = newSmT1NonState(ml)
+
+      addStateEXP[SmT1State](smT1, "s0NoTransition", s0NoTransition, s0Enter, s0Exit, nil)
+      addStateEXP[SmT1State](smT1, "s1TransitionToS0NoTransition", s1TransitionToS0NoTransition,
+        s1Enter, s1Exit, s0NoTransition)
+      startStateMachine[SmT1, SmT1State](smT1, s1TransitionToS0NoTransition)
+      # TODO: DANGEROUS, but addComponent requires this to return a ptr
+      result = cast[ptr Component](smT1)
+      echo "newSmT1TwoStatesHsm_S0S1TranstionToS0_StartS1TranstionToS0:-"
 
     proc newSmT1TriangleStates(ml: MsgLooperPtr): ptr Component =
       var smT1 = newSmT1NonState(ml)
@@ -534,6 +607,43 @@ when isMainModule:
 
       checkSendingTwoMsgs(smT1, ma, rcvq)
 
+    # Tests default as the one and only state
+    setup:
+      smT1 = addComponent[SmT1](ml, newSmT1OneStateTransitionToSelf)
+
+    teardown:
+      delComponent(ml, smT1, delSmT1)
+      smT1 = nil
+
+    const xname = "test-one-state-transitionTo-self"
+    test xname:
+      echo xname
+
+      proc checkSendingTwoMsgs(sm: ptr SmT1, ma: MsgArenaPtr,
+          rcvq: MsgQueuePtr) =
+        # Send first message, should be processed by default
+        var msg: MsgPtr
+        msg = ma.getMsg(rcvq, 1)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 1
+        check sm.count == 1
+        check sm.defaultCount == 0
+        check sm.s0Count == 1
+        check sm.s1Count == 0
+
+        # Send second message, should be processed by default
+        msg = ma.getMsg(rcvq, 2)
+        sm.rcvq.add(msg)
+        msg = rcvq.rmv()
+        check msg.cmd == 2
+        check sm.count == 2
+        check sm.defaultCount == 0
+        check sm.s0Count == 2
+        check sm.s1Count == 0
+
+      checkSendingTwoMsgs(smT1, ma, rcvq)
+
     # Test with two states s0, s1
     setup:
       smT1 = addComponent[SmT1](ml, newSmT1TwoStates)
@@ -558,6 +668,73 @@ when isMainModule:
       check smt1.s1Count == 0
 
       # Send second message, should be processed by S1
+      msg = smT1.ma.getMsg(rcvq, 2)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 2
+      check smt1.count == 2
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 1
+
+    # Test with two statehsm s0, s1 start s0
+    setup:
+      smT1 = addComponent[SmT1](ml, newSmT1TwoStateHSM_S0S1_StartS0)
+
+    teardown:
+      delComponent(ml, smT1, delSmT1)
+      smT1 = nil
+
+    test "test-two-statehsm-S0S1-StartS0":
+      var
+        rcvq = newMpscFifo("rcvq", smT1.ma)
+        msg: MsgPtr
+
+      # Send first message, should be processed by S0
+      msg = smT1.ma.getMsg(rcvq, 1)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 1
+      check smt1.count == 1
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 0
+
+      # Send second message, should be processed by S1
+      msg = smT1.ma.getMsg(rcvq, 2)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 2
+      check smt1.count == 2
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 1
+      check smt1.s1Count == 1
+
+    # Test with two statehsm s0, s1TransitionToS0 start s1TranstionToS0
+    setup:
+      smT1 = addComponent[SmT1](ml,
+        newSmT1TwoStatesHsm_S0NoTransitionS1TranstionToS0_StartS1TranstionToS0)
+
+    teardown:
+      delComponent(ml, smT1, delSmT1)
+      smT1 = nil
+
+    test "test-two-statehsm-S0S1TransitionToS0-StartS1TranstionToS0":
+      var
+        rcvq = newMpscFifo("rcvq", smT1.ma)
+        msg: MsgPtr
+
+      # Send first message, should be processed by S1
+      msg = smT1.ma.getMsg(rcvq, 1)
+      smT1.rcvq.add(msg)
+      msg = rcvq.rmv()
+      check msg.cmd == 1
+      check smt1.count == 1
+      check smt1.defaultCount == 0
+      check smt1.s0Count == 0
+      check smt1.s1Count == 1
+
+      # Send second message, should be processed by S0
       msg = smT1.ma.getMsg(rcvq, 2)
       smT1.rcvq.add(msg)
       msg = rcvq.rmv()
