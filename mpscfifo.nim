@@ -3,16 +3,17 @@
 ## is from Dimitry Vyukov's non intrusive MPSC code here:
 ##   http://www.1024cores.net/home/lock-free-algorithms/queues/non-intrusive-mpsc-node-based-queue
 ##
-## The fifo has a head and at tail, the elements are added
-## to the tail of the queue and removed from the head.
-## Rather than storing the elements directly in the queue
-## link nodes are used which have two fields, next and
-## extra. The next field point so the next element in the
-## list of nil if there no ext element. The extra field
-## points to the invokers data.
+## The fifo has a head and tail, the elements are added
+## to the head of the queue and removed from the tail.
+## To allow for a wait free algorithm a stub element is used
+## so that a single atomic instruction can be used to add and
+## remove an element. Therefore, when you create a queue you
+## must pass in an areana which is used to manage the stub.
 ##
-## ....
-##
+## A consequence of this algorithm is that when you add an
+## element to the queue a different element is returned when
+## you remove it from the queue. Of course the contents are
+## the same but the returned pointer will be different.
 
 import msg, msgarena, msgloopertypes, fifoutils, locks, strutils
 
@@ -50,7 +51,7 @@ proc isEmpty(mq: MsgQueuePtr): bool {.inline.} =
   ## no other threads are using the queue. Therefore
   ## this is private and only used in delMpscFifo and
   ## testing.
-  result = mq.head.next == nil
+  result = mq.tail.next == nil
 
 proc newMpscFifo*(name: string, arena: MsgArenaPtr,
     owner: bool, condBool: ptr bool, cond: ptr TCond, lock: ptr TLock,
@@ -144,8 +145,8 @@ proc add*(q: QueuePtr, msg: MsgPtr) =
     msg.next =  nil
 
     # serialization-point wrt to the single consumer, acquire-release
-    var prevTail = atomicExchangeN(addr mq.tail, msg, ATOMIC_ACQ_REL)
-    atomicStoreN(addr prevTail.next, msg, ATOMIC_RELEASE)
+    var prevHead = atomicExchangeN(addr mq.head, msg, ATOMIC_ACQ_REL)
+    atomicStoreN(addr prevHead.next, msg, ATOMIC_RELEASE)
     if mq.blocking == blockIfEmpty:
       mq.lock[].acquire()
       var prevCondBool = atomicExchangeN(mq.condBool, true, ATOMIC_RELEASE)
@@ -169,16 +170,16 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
     dbg "+ mq=" & $mq
 
   while true:
-    var head = mq.head
-    when DBG: dbg " head=" & $head
+    var tail = mq.tail
+    when DBG: dbg " tail=" & $tail
     # serialization-point wrt producers, acquire
-    var next = cast[MsgPtr](atomicLoadN(addr head.next, ATOMIC_ACQUIRE))
+    var next = cast[MsgPtr](atomicLoadN(addr tail.next, ATOMIC_ACQUIRE))
 
     when DBG: dbg " next=" & $next
     if next != nil:
-      # Not empty mq.head.next.extra is the users data
+      # Not empty mq.tail.next.extra is the users data
       # and it will be returned in the stub LinkNode
-      # pointed to by mq.head.
+      # pointed to by mq.tail.
 
       if mq.blocking == blockIfEmpty:
         # Note: here we check the mq.blocking field not the blocking
@@ -200,18 +201,18 @@ proc rmv*(q: QueuePtr, blocking: Blocking): MsgPtr =
           atomicStoreN(mq.condBool, false, ATOMIC_RELEASE)
         mq.lock[].release()
 
-      # Have head point to next (aka mq.head.next) as it will be the
+      # Have tail point to next (aka mq.tail.next) as it will be the
       # new stub LinkNode
-      mq.head = next
+      mq.tail = next
 
-      # And head, the old stub LinkNode aka mq.head is result
+      # And tail, the old stub LinkNode aka mq.tail is result
       # and we set result.next to nil so the link node is
       # ready to be reused and result.extra contains the
-      # users data i.e. mq.head.next.extra.
-      result = head
+      # users data i.e. mq.tail.next.extra.
+      result = tail
       result.next = nil
-      result.rspq = next.rspq
       result.cmd = next.cmd
+      result.rspq = next.rspq
       result.extra = next.extra
 
       # We've got a node break out of the loop

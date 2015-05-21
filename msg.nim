@@ -23,8 +23,8 @@ type
   MsgPtr* = ptr Msg
   Msg* = object of RootObj
     next*: MsgPtr
-    rspq*: QueuePtr
     cmd*: int32
+    rspq*: QueuePtr
     extra*: int
 
 proc `$`*(msg: MsgPtr): string =
